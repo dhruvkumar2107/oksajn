@@ -1,5 +1,5 @@
 import logging
-from datetime import datetime, time
+from datetime import datetime, time, timedelta
 from zoneinfo import ZoneInfo
 from typing import Optional, Tuple
 import pandas as pd
@@ -47,10 +47,15 @@ def uk_to_utc(ts: pd.Timestamp) -> pd.Timestamp:
 
 
 def get_decision_cutoff_for_delivery(delivery_start_utc: pd.Timestamp) -> pd.Timestamp:
+    """Return D-1 cutoff at the configured UK wall-clock time.
+
+    Subtract the calendar day before localizing. Subtracting 24 hours from a
+    timezone-aware timestamp would shift the local clock around DST changes.
+    """
     delivery_uk = utc_to_uk(delivery_start_utc)
-    delivery_date = delivery_uk.date()
-    cutoff_uk = pd.Timestamp.combine(delivery_date, config.decision_cutoff_time).tz_localize(UK_TZ)
-    cutoff_uk = cutoff_uk - pd.Timedelta(days=1)
+    cutoff_date = delivery_uk.date() - timedelta(days=1)
+    naive_cutoff = pd.Timestamp(datetime.combine(cutoff_date, config.decision_cutoff_time))
+    cutoff_uk = naive_cutoff.tz_localize(UK_TZ)
     return cutoff_uk.tz_convert("UTC")
 
 
