@@ -1,5 +1,5 @@
 import React from 'react';
-import { formatMW, formatNumber, formatPercent } from '../services/api';
+import { formatDateTime, formatMW, formatNumber, formatPercent } from '../services/api';
 
 export function KPICard({ title, value, subtitle, variant, unit }) {
   const numericValue = typeof value === 'number'
@@ -33,6 +33,8 @@ export function OverviewCards({ summary, accuracy, lastRefresh }) {
   const metrics = accuracy?.metrics || {};
   const coverage = summary?.coverage || {};
   const dataQuality = summary?.data_quality || {};
+  const latestForecastPublished = dataQuality.latest_eligible_forecast_publish_time || null;
+  const biasValue = metrics.bias_mw?.value;
 
   return (
     <div className="card-grid">
@@ -52,8 +54,14 @@ export function OverviewCards({ summary, accuracy, lastRefresh }) {
         title="Mean Bias"
         value={metrics.bias_mw?.value}
         unit="MW"
-        variant={metrics.bias_mw?.value > 0 ? 'warning' : metrics.bias_mw?.value < 0 ? 'success' : ''}
-        subtitle={metrics.bias_mw?.value > 0 ? 'Systematic overestimation' : metrics.bias_mw?.value < 0 ? 'Systematic underestimation' : 'No systematic bias'}
+        variant={biasValue > 0 ? 'warning' : biasValue < 0 ? 'success' : ''}
+        subtitle={biasValue === null || biasValue === undefined
+          ? 'Unavailable until matched intervals exist'
+          : biasValue > 0
+            ? 'Systematic overestimation'
+            : biasValue < 0
+              ? 'Systematic underestimation'
+              : 'No systematic bias'}
       />
       <KPICard
         title="MAPE"
@@ -66,6 +74,11 @@ export function OverviewCards({ summary, accuracy, lastRefresh }) {
         value={coverage.coverage_percent}
         unit="%"
         subtitle={`${coverage.matched_intervals || 0} of ${coverage.total_intervals || 0} intervals matched`}
+      />
+      <KPICard
+        title="Latest Eligible Forecast Published"
+        value={latestForecastPublished ? formatDateTime(latestForecastPublished) : 'Unavailable'}
+        subtitle="Latest selected forecast vintage in the January 2026 evaluation"
       />
       <KPICard
         title="Data Last Refreshed"
