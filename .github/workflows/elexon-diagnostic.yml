@@ -22,7 +22,8 @@ jobs:
         run: |
           python - <<'PY'
           import json
-          import requests
+          import urllib.parse
+          import urllib.request
 
           base = "https://data.elexon.co.uk/bmrs/api/v1"
           windows = {
@@ -32,14 +33,11 @@ jobs:
           for dataset, (start, end) in windows.items():
               url = f"{base}/datasets/{dataset}/stream"
               try:
-                  response = requests.get(
-                      url,
-                      params={"publishDateTimeFrom": start, "publishDateTimeTo": end},
-                      timeout=25,
-                  )
-                  print(f"DATASET={dataset} STATUS={response.status_code} URL={response.url}")
-                  response.raise_for_status()
-                  payload = response.json()
+                  query = urllib.parse.urlencode({"publishDateTimeFrom": start, "publishDateTimeTo": end})
+                  request = urllib.request.Request(url + "?" + query, headers={"User-Agent": "WindSight-diagnostic/1.0"})
+                  with urllib.request.urlopen(request, timeout=25) as response:
+                      print(f"DATASET={dataset} STATUS={response.status} URL={response.url}")
+                      payload = json.loads(response.read().decode("utf-8"))
                   rows = payload if isinstance(payload, list) else payload.get("data", [])
                   if not isinstance(rows, list):
                       rows = []
