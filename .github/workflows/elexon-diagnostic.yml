@@ -51,3 +51,23 @@ jobs:
                   print(f"DATASET={dataset} ERROR={type(exc).__name__}: {exc}")
                   raise
           PY
+
+      - name: Exercise January 2026 ingestion pipeline
+        run: |
+          python -m pip install -r backend/requirements.txt
+          python - <<'PY'
+          import json
+          from app import create_app
+          from app.services.data_processor import ingest_and_evaluate_period
+
+          app = create_app()
+          with app.app_context():
+              stats = ingest_and_evaluate_period("2026-01-01", "2026-02-01")
+          print("JANUARY_2026_INGESTION_STATS=" + json.dumps(stats, default=str))
+          PY
+        env:
+          PYTHONPATH: backend
+          DB_PATH: ${{ runner.temp }}/windsight-elexon-diagnostic.db
+          ELEXON_MAX_CONCURRENCY: "6"
+          ELEXON_TIMEOUT: "20"
+          ELEXON_MAX_RETRIES: "1"
