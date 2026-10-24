@@ -45,3 +45,52 @@ def test_init_db_migrates_older_evaluation_table_without_deleting_rows(tmp_path,
         ).fetchone()
 
     assert row == ("2026-01-15", 0, 0)
+
+
+
+def test_summary_and_accuracy_calculate_metrics_from_matched_intervals(tmp_path, monkeypatch):
+    db_path = tmp_path / "metrics-test.db"
+    monkeypatch.setattr(config, "DB_PATH", str(db_path))
+    app = create_app()
+    app.config.update(TESTING=True)
+
+    with sqlite3.connect(db_path) as conn:
+        conn.executemany(
+            """
+            INSERT INTO evaluation_results
+              (settlement_date, settlement_period, start_time_utc,
+               actual_generation_mw, selected_forecast_generation_mw,
+               selected_forecast_publish_time_utc, error_mw, absolute_error_mw,
+               is_overestimation, is_underestimation, has_eligible_forecast,
+               has_actual, evaluation_status, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            [
+                ("2026-01-15", 1, "2026-01-15T00:00:00+00:00",
+                 1000.0, 1100.0, "2026-01-14T10:30:00+00:00",
+                 100.0, 100.0, 1, 0, 1, 1, "evaluated", "2026-01-15T00:00:00Z"),
+                ("2026-01-15", 2, "2026-01-15T00:30:00+00:00",
+                 1200.0, 1100.0, "2026-01-14T10:30:00+00:00",
+                 -100.0, 100.0, 0, 1, 1, 1, "evaluated", "2026-01-15T00:30:00Z"),
+            ],
+        )
+        conn.commit()
+
+    client = app.test_client()
+    summary_response = client.get("/api/summary?month=2026-01")
+    accuracy_response = client.get("/api/accuracy?month=2026-01")
+
+    assert summary_response.status_code == 200
+    summary = summary_response.get_json()
+    assert summary["metrics"]["mae_mw"] == 100.0
+    assert summary["metrics"]["rmse_mw"] == 100.0
+    assert summary["metrics"]["bias_mw"] == 0.0
+    assert summary["coverage"]["matched_intervals"] == 2
+    assert summary["coverage"]["coverage_percent"] == 100.0
+
+    assert accuracy_response.status_code == 200
+    accuracy = accuracy_response.get_json()
+    assert accuracy["metrics"]["mae_mw"]["value"] == 100.0
+    assert accuracy["metrics"]["rmse_mw"]["value"] == 100.0
+    assert accuracy["metrics"]["bias_mw"]["value"] == 0.0
+    assert accuracy["metrics"]["mape_percent"]["sample_count"] == 2
