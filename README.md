@@ -6,7 +6,7 @@ A pilot web application for a UK energy utility's day-ahead procurement team. It
 
 WindSight helps procurement teams at UK electricity utilities understand:
 - **Latest eligible national wind forecasts** available at purchasing decision time
-- **Forecast accuracy metrics** (MAE, RMSE, Bias, MAPE) using genuine Elexon data
+- **Forecast accuracy metrics** (MAE, RMSE, Bias, MAPE) when genuine, validated historical records are available
 - **Forecast overestimation/underestimation patterns** for risk management
 - **Interval-level audit trails** with forecast publication timestamps for transparency
 
@@ -66,7 +66,7 @@ WindSight uses only the two official Elexon BMRS datasets specified in the assig
 2. **Normalization**: Parse timestamps to UTC, convert to `Europe/London` for cutoff logic
 3. **Forecast Selection**: For each delivery interval, select the latest forecast with `publishTime ≤ decision_cutoff`
 4. **Evaluation**: Join actuals with selected forecasts, calculate signed errors
-5. **Storage**: Persist raw data, selected forecasts, and evaluation results in SQLite
+5. **Storage**: Persist normalized actuals, forecast vintages, and evaluation results in SQLite
 6. **API**: Serve aggregated metrics, time-series data, and paginated interval records
 7. **UI**: Render KPI cards, interactive charts, and audit table with CSV export
 
@@ -273,7 +273,7 @@ docker compose exec backend bash
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `DB_PATH` | `/data/windsight.db` | SQLite database path |
+| `DB_PATH` | `./windsight.db` locally; `/data/windsight.db` in Docker/host config | SQLite database path |
 | `ELEXON_BASE_URL` | `https://data.elexon.co.uk/bmrs/api/v1` | Elexon API base |
 | `ELEXON_TIMEOUT` | `30` | Request timeout (seconds) |
 | `ELEXON_MAX_RETRIES` | `3` | Retry attempts for transient errors |
@@ -391,7 +391,7 @@ npm run build
    - Mount Path: `/data`
    - Size: 1 GB
 7. Set **Health Check Path**: `/api/health`
-8. Deploy — Render uses `render.yaml` if present
+8. Deploy the service, then verify `/api/health`. This repository uses manual Render service settings and does not include a `render.yaml`.
 
 ### Backend → Railway (Alternative)
 1. Connect GitHub repository to Railway
@@ -417,7 +417,7 @@ The Vercel frontend uses the same-origin `/api` rewrite, so browser requests pas
 1. Backend health: open `https://oksajn.onrender.com/api/health`
 2. Frontend loads: open `https://frontend-95b6.vercel.app`
 3. Frontend → Backend: Check browser network tab for successful API calls
-4. Import test data: Use dashboard Import button with sample JSON files
+4. Import genuine Elexon JSON or CSV exports from the required period. Synthetic fixtures are for automated tests only and must not be presented as real January 2026 results.
 5. Verify charts, table, CSV export all work
 
 ## 🎥 Video Demo and Submission
