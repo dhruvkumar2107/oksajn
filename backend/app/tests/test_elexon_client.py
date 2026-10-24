@@ -1,6 +1,7 @@
 import pytest
 import requests
 import requests_mock
+from urllib.parse import parse_qs, urlsplit
 from app.services.elexon_client import ElexonClient, ElexonAPIError
 
 
@@ -60,10 +61,11 @@ class TestElexonClient:
                 end_time="2026-01-01T12:00:00Z",
             )
             request = m.last_request
-            assert request.qs["publishDateTimeFrom"] == ["2026-01-01T00:00:00Z"]
-            assert request.qs["publishDateTimeTo"] == ["2026-01-01T12:00:00Z"]
-            assert "startTime" not in request.qs
-            assert "endTime" not in request.qs
+            query = parse_qs(urlsplit(request.url).query)
+            assert query.get("publishDateTimeFrom") == ["2026-01-01T00:00:00Z"], request.url
+            assert query.get("publishDateTimeTo") == ["2026-01-01T12:00:00Z"], request.url
+            assert "startTime" not in query, request.url
+            assert "endTime" not in query, request.url
 
     def test_http_error_raises(self, client):
         with requests_mock.Mocker() as m:
