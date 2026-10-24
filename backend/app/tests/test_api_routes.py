@@ -87,6 +87,7 @@ def test_summary_and_accuracy_calculate_metrics_from_matched_intervals(tmp_path,
     assert summary["metrics"]["bias_mw"] == 0.0
     assert summary["coverage"]["matched_intervals"] == 2
     assert summary["coverage"]["coverage_percent"] == 100.0
+    assert summary["data_quality"]["latest_eligible_forecast_publish_time"] == "2026-01-14T10:30:00+00:00"
 
     assert accuracy_response.status_code == 200
     accuracy = accuracy_response.get_json()
