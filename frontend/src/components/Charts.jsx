@@ -1,4 +1,5 @@
 import React from 'react';
+import { formatDateTime } from '../services/api';
 import {
   LineChart,
   Line,
@@ -60,12 +61,17 @@ function CustomTooltip({ active, payload, label }) {
           }} />
           <span>{entry.name}: </span>
           <span style={{ fontWeight: 500 }}>
-            {entry.value !== null && entry.value !== undefined 
+            {entry.value !== null && entry.value !== undefined
               ? entry.value.toLocaleString('en-GB', { minimumFractionDigits: 1, maximumFractionDigits: 1 }) + ' MW'
               : '—'}
           </span>
         </div>
       ))}
+      {payload[0]?.payload?.forecastPublishTime && (
+        <div style={{ marginTop: 8, paddingTop: 8, borderTop: '1px solid #E0E0E0', color: '#424242', fontSize: 12 }}>
+          Forecast published: {formatDateTime(payload[0].payload.forecastPublishTime)}
+        </div>
+      )}
     </div>
   );
 }
