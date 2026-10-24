@@ -26,9 +26,15 @@ WindSight uses only the two official Elexon BMRS datasets specified in the assig
 | **FUELHH** | `/datasets/FUELHH/stream` | Actual generation; application filters `fuelType=WIND` and uses `startTime` and `generation` |
 | **WINDFOR** | `/datasets/WINDFOR/stream` | Forecast generation using `startTime`, `publishTime`, and `generation` |
 
-**Official Documentation:**
+**Official Documentation (human-readable reference pages):**
 - [FUELHH Dataset](https://bmrs.elexon.co.uk/api-documentation/endpoint/datasets/FUELHH/stream)
 - [WINDFOR Dataset](https://bmrs.elexon.co.uk/api-documentation/endpoint/datasets/WINDFOR/stream)
+
+**Live JSON API endpoints called by the backend:**
+- **Actual wind generation:** [FUELHH stream](https://data.elexon.co.uk/bmrs/api/v1/datasets/FUELHH/stream) — the backend filters returned records to `fuelType=WIND`.
+- **Wind generation forecasts:** [WINDFOR stream](https://data.elexon.co.uk/bmrs/api/v1/datasets/WINDFOR/stream) — the backend preserves `startTime`, `publishTime`, and `generation`.
+
+The documentation links above describe the APIs; they are not the JSON data URLs. The live stream URLs are queried with `publishDateTimeFrom` and `publishDateTimeTo` (publication-time filters). The backend then filters records by delivery `startTime` for the requested January 2026 period. Both endpoint URLs can be overridden with `ELEXON_FUELHH_STREAM_URL` and `ELEXON_WINDFOR_STREAM_URL`.
 
 ## 🛠 Technology Stack
 

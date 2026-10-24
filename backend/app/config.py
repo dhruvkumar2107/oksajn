@@ -28,6 +28,18 @@ class Config:
     ELEXON_BASE_URL: str = os.getenv(
         "ELEXON_BASE_URL", "https://data.elexon.co.uk/bmrs/api/v1"
     ).rstrip("/")
+    # These are the live JSON stream endpoints; the bmrs.elexon.co.uk links
+    # in the README are the human-readable API documentation pages.
+    ELEXON_FUELHH_STREAM_URL: str = os.getenv(
+        "ELEXON_FUELHH_STREAM_URL",
+        os.getenv("ELEXON_BASE_URL", "https://data.elexon.co.uk/bmrs/api/v1").rstrip("/")
+        + "/datasets/FUELHH/stream",
+    ).rstrip("/")
+    ELEXON_WINDFOR_STREAM_URL: str = os.getenv(
+        "ELEXON_WINDFOR_STREAM_URL",
+        os.getenv("ELEXON_BASE_URL", "https://data.elexon.co.uk/bmrs/api/v1").rstrip("/")
+        + "/datasets/WINDFOR/stream",
+    ).rstrip("/")
     ELEXON_TIMEOUT: int = _int_env("ELEXON_TIMEOUT", 30)
     ELEXON_MAX_RETRIES: int = _int_env("ELEXON_MAX_RETRIES", 3)
     ELEXON_MAX_CONCURRENCY: int = _int_env("ELEXON_MAX_CONCURRENCY", 6)

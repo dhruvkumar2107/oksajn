@@ -38,6 +38,7 @@ class ElexonClient:
 
     def __init__(self, base_url: Optional[str] = None, timeout: Optional[int] = None,
                  max_retries: Optional[int] = None):
+        self._custom_base_url = base_url is not None
         self.base_url = (base_url or config.ELEXON_BASE_URL).rstrip("/")
         self.timeout = timeout or config.ELEXON_TIMEOUT
         self.max_retries = config.ELEXON_MAX_RETRIES if max_retries is None else max_retries
@@ -61,7 +62,7 @@ class ElexonClient:
         return session
 
     def _make_request(self, endpoint: str, params: Optional[dict] = None) -> list:
-        url = f"{self.base_url}{endpoint}"
+        url = endpoint if endpoint.startswith(("https://", "http://")) else f"{self.base_url}{endpoint}"
         try:
             response = self.session.get(url, params=params, timeout=self.timeout)
             logger.info("Elexon GET %s status=%s params=%s", url, response.status_code, params)
@@ -102,6 +103,12 @@ class ElexonClient:
                      settlement_date: Optional[str] = None,
                      settlement_period: Optional[int] = None) -> list:
         endpoint = f"/datasets/{dataset}/stream"
+        if not self._custom_base_url:
+            endpoint = (
+                config.ELEXON_FUELHH_STREAM_URL
+                if dataset == "FUELHH"
+                else config.ELEXON_WINDFOR_STREAM_URL
+            )
         extra = {}
         # Keep optional filters for compatibility, but historical range filtering
         # is always done using the documented publication-time fields.
