@@ -92,6 +92,20 @@ class TestActualGenerationNormalization:
         df = normalize_actual_generation(raw)
         assert len(df) == 1
 
+    def test_actual_revision_keeps_latest_publication_for_delivery_interval(self):
+        raw = [
+            {"settlementDate": "2026-01-15", "settlementPeriod": 1,
+             "startTime": "2026-01-15T00:00:00Z", "publishTime": "2026-01-15T00:45:00Z",
+             "generation": 1000, "fuelType": "WIND"},
+            {"settlementDate": "2026-01-15", "settlementPeriod": 1,
+             "startTime": "2026-01-15T00:00:00Z", "publishTime": "2026-01-15T01:00:00Z",
+             "generation": 1050, "fuelType": "WIND"},
+        ]
+        df = normalize_actual_generation(raw)
+        assert len(df) == 1
+        assert df.iloc[0]["generation_mw"] == 1050
+        assert df.iloc[0]["publish_time_utc"] == pd.Timestamp("2026-01-15T01:00:00Z", tz="UTC")
+
 
 class TestForecastGenerationNormalization:
     def test_normalize_basic(self):
