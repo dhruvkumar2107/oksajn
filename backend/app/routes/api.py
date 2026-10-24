@@ -19,6 +19,16 @@ logger = logging.getLogger(__name__)
 api_bp = Blueprint("api", __name__, url_prefix="/api")
 
 
+@api_bp.errorhandler(Exception)
+def handle_unexpected_api_error(error):
+    """Log the real exception server-side and keep HTML tracebacks out of API responses."""
+    logger.exception("Unhandled API error: %s", error)
+    return jsonify({
+        "error": "internal_server_error",
+        "message": "The API encountered an internal error. The server log contains the diagnostic details.",
+    }), 500
+
+
 def _safe_round(value, decimals=2):
     if value is None or pd.isna(value):
         return None
