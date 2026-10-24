@@ -1,6 +1,6 @@
 # WindSight | Day-Ahead Analytics
 
-A production-quality pilot application for UK energy utilities to evaluate day-ahead wind generation forecast accuracy against actual generation, supporting informed electricity procurement decisions.
+A pilot web application for a UK energy utility's day-ahead procurement team. It compares national wind generation actuals with the forecast vintage that was available by a configurable decision cutoff, and calculates forecast-error metrics.
 
 ## 📋 Overview
 
@@ -17,14 +17,14 @@ UK electricity utilities buy power on the wholesale day-ahead market (EPEX SPOT,
 2. Which forecast vintage was available when they made purchasing decisions
 3. How accurate those forecasts have been historically
 
-WindSight provides this analysis using only **official Elexon BMRS datasets**, ensuring regulatory alignment and data integrity.
+WindSight uses only the two official Elexon BMRS datasets specified in the assignment. No other market, weather, or generation data source is used.
 
 ## 📊 Data Sources
 
 | Dataset | Elexon Endpoint | Purpose |
 |---------|----------------|---------|
-| **FUELHH** | `/datasets/FUELHH` | Actual wind generation (half-hourly, `fuelType=WIND`) |
-| **WINDFOR** | `/datasets/WINDFOR` | Forecast wind generation with publication timestamps |
+| **FUELHH** | `/datasets/FUELHH/stream` | Actual generation; application filters `fuelType=WIND` and uses `startTime` and `generation` |
+| **WINDFOR** | `/datasets/WINDFOR/stream` | Forecast generation using `startTime`, `publishTime`, and `generation` |
 
 **Official Documentation:**
 - [FUELHH Dataset](https://bmrs.elexon.co.uk/api-documentation/endpoint/datasets/FUELHH/stream)
@@ -77,15 +77,16 @@ windsight/
 ├── backend/
 │   ├── app/
 │   │   ├── __init__.py          # Flask app factory
-│   │   ├── config.py            # Configuration (cutoff, thresholds, etc.)
-│   │   ├── models/__init__.py   # SQLite schema & data access
-│   │   ├── routes/
-│   │   │   └── api.py           # REST endpoints
+│   │   ├── __main__.py          # Local entry point for python -m app
+│   │   ├── config.py            # Environment-backed settings
+│   │   ├── models/__init__.py   # SQLite schema, migrations & data access
+│   │   ├── routes/api.py        # REST API endpoints
 │   │   ├── services/
-│   │   │   ├── elexon_client.py # API client with retries/timeouts
-│   │   │   └── data_processor.py # Normalization, selection, metrics
+│   │   │   ├── elexon_client.py
+│   │   │   └── data_processor.py
 │   │   └── tests/
 │   │       ├── conftest.py
+│   │       ├── test_api_routes.py
 │   │       ├── test_data_processor.py
 │   │       └── test_elexon_client.py
 │   ├── requirements.txt
@@ -93,12 +94,10 @@ windsight/
 ├── frontend/
 │   ├── src/
 │   │   ├── components/
-│   │   │   ├── Charts.jsx       # Recharts components
-│   │   │   ├── KPICards.jsx     # Metric display cards
-│   │   │   └── IntervalTable.jsx # Paginated audit table
-│   │   ├── pages/
-│   │   ├── services/
-│   │   │   └── api.js           # API client & formatters
+│   │   │   ├── Charts.jsx
+│   │   │   ├── KPICards.jsx
+│   │   │   └── IntervalTable.jsx
+│   │   ├── services/api.js      # API client & formatters
 │   │   ├── App.jsx              # Main dashboard
 │   │   ├── main.jsx             # Entry point
 │   │   └── styles.css           # Design system
@@ -107,6 +106,8 @@ windsight/
 │   ├── Dockerfile
 │   └── nginx.conf
 ├── docker-compose.yml
+├── docs/VIDEO_DEMO_SCRIPT.md
+├── .github/workflows/ci.yml
 ├── .env.example
 ├── .dockerignore
 ├── .gitignore
@@ -158,9 +159,9 @@ error_MW = forecast_generation_MW - actual_generation_MW
 | **RMSE** | `sqrt(mean((forecast - actual)²))` | Penalizes large errors more heavily |
 | **Bias** | `mean(forecast - actual)` | Systematic tendency (+ve = overestimation) |
 | **MAPE** | `mean(|forecast - actual| / |actual|) × 100` | Percentage error (excludes actuals ≤ 1 MW) |
-| **Coverage** | `matched_intervals / total_intervals` | Data completeness for evaluation |
+| **Coverage** | `matched_intervals / intervals_with_actual × 100` | Share of actual delivery intervals that have both actuals and an eligible forecast |
 
-All metrics calculated **only on matched intervals** with both actual and eligible forecast.
+MAE, RMSE, and bias are calculated **only on matched intervals** with both actuals and eligible forecasts. MAPE additionally excludes observations whose absolute actual generation is at or below the configured threshold. Coverage is shown with its numerator and denominator.
 
 ## 📅 Historical Data Coverage & Limitations
 
@@ -198,8 +199,8 @@ Historical data retrieval is considered verified only when real January 2026 rec
 
 ```bash
 # Clone and navigate
-git clone <repository-url>
-cd windsight
+git clone https://github.com/dhruvkumar2107/oksajn.git
+cd oksajn
 
 # Copy environment config
 cp .env.example .env
@@ -214,22 +215,26 @@ docker compose up --build
 
 ### Without Docker
 
-**Backend:**
+Open two terminal windows from the repository root.
+
+**Terminal 1 — Backend:**
 ```bash
 cd backend
 python -m venv .venv
-source .venv/bin/activate  # Windows: .venv\Scripts\activate
+source .venv/bin/activate  # Windows PowerShell: .venv\Scripts\Activate.ps1
 pip install -r requirements.txt
-cp ../.env.example .env
+cp ../.env.example .env    # Windows: copy ..\.env.example .env
 python -m app
 ```
 
-**Frontend:**
+**Terminal 2 — Frontend:**
 ```bash
 cd frontend
-npm install
-npm run dev  # http://localhost:5173
+npm ci
+npm run dev
 ```
+
+Open `http://localhost:5173`. The Vite dev server proxies `/api` to `http://localhost:5000` by default. Do not start the backend and frontend commands in the same terminal unless you run them as separate processes.
 
 ## 🌍 Live Demo
 
@@ -239,7 +244,7 @@ npm run dev  # http://localhost:5173
 | **Backend API** | https://oksajn.onrender.com |
 | **Health Check** | https://oksajn.onrender.com/api/health |
 
-> **Submission Note:** For the challenge submission, create a **new anonymous public GitHub repo** (e.g., `kjhwr`, `x7k9m2`) and push this code there. Update this README with the actual deployed URLs from your deployment.
+> **Repository:** This code is hosted in the public repository [dhruvkumar2107/oksajn](https://github.com/dhruvkumar2107/oksajn). The repository name `oksajn` is a non-descriptive, anonymous-style name. Do not create a second repository unless your submission instructions specifically require a different one.
 
 ## 🐳 Docker Commands
 
@@ -395,7 +400,7 @@ npm run build
 4. Add Environment Variables from `.env.example`
 5. Add **Volume**: `windsight-data` → `/data`
 6. Set **Health Check Path**: `/api/health`
-7. Deploy — Railway uses `railway.json` if present
+7. Deploy the service and verify `/api/health`; this repository currently uses manual Railway service settings and does not include a `railway.json`.
 
 ### Backend → Fly.io (Alternative)
 ```bash
@@ -409,11 +414,21 @@ fly deploy
 The Vercel frontend uses the same-origin `/api` rewrite, so browser requests pass through Vercel to the backend. Keep backend CORS restricted to explicitly permitted origins if direct cross-origin clients are also needed. The backend's `CORS_ORIGINS` setting is environment-configurable.
 
 ### Verification Steps After Deployment
-1. Backend health: `curl https://windsight-backend.onrender.com/api/health`
-2. Frontend loads: Open `https://windsight-frontend.vercel.app`
+1. Backend health: open `https://oksajn.onrender.com/api/health`
+2. Frontend loads: open `https://frontend-95b6.vercel.app`
 3. Frontend → Backend: Check browser network tab for successful API calls
 4. Import test data: Use dashboard Import button with sample JSON files
 5. Verify charts, table, CSV export all work
+
+## 🎥 Video Demo and Submission
+
+The assignment requires one **unlisted YouTube video no longer than 10 minutes**, with two sections:
+- **Part 1 — Client pitch (maximum 5 minutes):** business problem, working dashboard, latest eligible forecast information, forecast error metrics, genuine January 2026 findings, and limitations.
+- **Part 2 — Technical review (maximum 5 minutes):** architecture, Elexon integration, cutoff logic, data handling, metric calculations, tests, Docker, and deployment.
+
+A ready-to-record script and checklist are provided in [docs/VIDEO_DEMO_SCRIPT.md](docs/VIDEO_DEMO_SCRIPT.md). The script does not count as the video deliverable: record the screen and narration, upload the video as **Unlisted**, and verify it opens in an incognito window before submitting.
+
+**Submission form:** [Full Stack SWE challenge submission v4](https://forms.cloud.microsoft/r/Ljmf1aWESK). Complete the form after the unlisted video, public repository, and live app links have been verified. This README does not claim the form or YouTube upload has been completed.
 
 ## 📝 AI Tool Disclosure
 
@@ -421,8 +436,8 @@ ChatGPT was used to help plan the requirements, review implementation details, a
 
 ## ⚠️ Known Limitations
 
-1. **Historical coverage must be verified**: dataset stream filters operate on publication time; the availability of all January 2026 forecast vintages depends on the response/export. The latest-only forecast endpoint alone is insufficient to reconstruct all vintage history.
-2. **Single Cutoff**: Uses fixed 11:00 UK cutoff; real market has multiple gate closures
+1. **Historical coverage must be verified against returned records**: the dataset API supports queries by published time. The app must still verify real January 2026 delivery coverage and preserve original WINDFOR publishTime values. A latest-only view is not a substitute for all required historical forecast vintages.
+2. **Cutoff assumption**: The 11:00 UK D-1 cutoff is configurable for the pilot and must be confirmed against the customer's actual procurement process.
 3. **National Only**: No regional/zonal wind breakdown
 4. **No Demand Data**: Procurement decisions need demand forecasts (out of scope)
 5. **No Balancing Costs**: Imbalance pricing not modeled
@@ -438,10 +453,6 @@ ChatGPT was used to help plan the requirements, review implementation details, a
 - [ ] PostgreSQL for production deployment
 - [ ] Authentication & multi-user support
 - [ ] Automated scheduled data refresh
-
-## 📜 License
-
-MIT License — See LICENSE file for details.
 
 ## 🤝 Contributing
 
