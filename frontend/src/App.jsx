@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { api, formatDate, formatMW, formatNumber, formatPercent } from './services/api';
 import { KPICard, OverviewCards, MetricExplanationCard } from './components/KPICards';
 import { ForecastVsActualChart, ErrorChart, DailyErrorChart } from './components/Charts';
@@ -19,6 +19,9 @@ function App() {
   const [actualImportFile, setActualImportFile] = useState(null);
   const [forecastImportFile, setForecastImportFile] = useState(null);
   const [importMessage, setImportMessage] = useState("");
+  const [activeAction, setActiveAction] = useState(null);
+  const actualFileInputRef = useRef(null);
+  const forecastFileInputRef = useRef(null);
 
   const fetchSummary = useCallback(async () => {
     try {
@@ -77,6 +80,8 @@ function App() {
   }, [dateRange.start, dateRange.end]);
 
   const handleRefresh = async () => {
+    if (activeAction) return;
+    setActiveAction("refresh");
     setErrors(prev => { const next = { ...prev }; delete next.refresh; return next; });
     setImportMessage("");
     try {
@@ -95,15 +100,32 @@ function App() {
       setErrors(prev => ({ ...prev, refresh: err.message }));
     } finally {
       setLoading(prev => ({ ...prev, summary: false, accuracy: false, forecasts: false, intervals: false }));
+      setActiveAction(null);
     }
   };
 
+  const handleImportAction = () => {
+    if (activeAction) return;
+    setErrors(prev => { const next = { ...prev }; delete next.import; return next; });
+    if (!actualImportFile) {
+      actualFileInputRef.current?.click();
+      return;
+    }
+    if (!forecastImportFile) {
+      forecastFileInputRef.current?.click();
+      return;
+    }
+    void handleImport();
+  };
+
   const handleImport = async () => {
+    if (activeAction) return;
     if (!actualImportFile || !forecastImportFile) {
       setErrors(prev => ({ ...prev, import: 'Select both the FUELHH WIND actuals and WINDFOR forecast files first.' }));
       return;
     }
 
+    setActiveAction("import");
     setErrors(prev => { const next = { ...prev }; delete next.import; return next; });
     setImportMessage("");
     try {
@@ -128,6 +150,7 @@ function App() {
       setErrors(prev => ({ ...prev, import: err.message }));
     } finally {
       setLoading(prev => ({ ...prev, summary: false, accuracy: false, forecasts: false, intervals: false }));
+      setActiveAction(null);
     }
   };
 
@@ -176,33 +199,44 @@ function App() {
           </div>
           <div className="header-actions">
             <div className="file-pickers">
-              <label htmlFor="actual-file-input" className="btn btn-secondary">
-                {actualImportFile ? 'Actuals selected ✓' : 'Choose actuals file'}
-              </label>
               <input
+                ref={actualFileInputRef}
                 type="file"
                 id="actual-file-input"
                 accept=".json,.csv,application/json,text/csv"
                 onChange={event => setActualImportFile(event.target.files?.[0] || null)}
                 className="visually-hidden-file"
+                aria-label="Choose Elexon FUELHH WIND actuals file"
               />
-              <label htmlFor="forecast-file-input" className="btn btn-secondary">
-                {forecastImportFile ? 'Forecasts selected ✓' : 'Choose forecasts file'}
-              </label>
+              <button type="button" className="btn btn-secondary"
+                onClick={() => actualFileInputRef.current?.click()}
+                disabled={activeAction !== null}
+                title={actualImportFile?.name || "Choose Elexon FUELHH WIND actuals JSON or CSV"}>
+                {actualImportFile ? `Actuals: ${actualImportFile.name}` : 'Choose actuals file'}
+              </button>
               <input
+                ref={forecastFileInputRef}
                 type="file"
                 id="forecast-file-input"
                 accept=".json,.csv,application/json,text/csv"
                 onChange={event => setForecastImportFile(event.target.files?.[0] || null)}
                 className="visually-hidden-file"
+                aria-label="Choose Elexon WINDFOR forecast file"
               />
+              <button type="button" className="btn btn-secondary"
+                onClick={() => forecastFileInputRef.current?.click()}
+                disabled={activeAction !== null}
+                title={forecastImportFile?.name || "Choose Elexon WINDFOR forecast JSON or CSV"}>
+                {forecastImportFile ? `Forecasts: ${forecastImportFile.name}` : 'Choose forecasts file'}
+              </button>
             </div>
-            <button className="btn btn-primary" onClick={handleImport}
-              disabled={!actualImportFile || !forecastImportFile || isLoading}>
-              Import historical data
+            <button type="button" className="btn btn-primary" onClick={handleImportAction}
+              disabled={activeAction !== null}
+              title={!actualImportFile ? "Click to choose the actuals file" : !forecastImportFile ? "Click to choose the forecasts file" : "Import selected Elexon files"}>
+              {activeAction === 'import' ? 'Importing…' : 'Import historical data'}
             </button>
-            <button className="btn btn-secondary" onClick={handleRefresh} disabled={isLoading}>
-              Refresh from Elexon
+            <button type="button" className="btn btn-secondary" onClick={handleRefresh} disabled={activeAction !== null}>
+              {activeAction === 'refresh' ? 'Refreshing from Elexon…' : 'Refresh from Elexon'}
             </button>
           </div>
         </div>
@@ -217,6 +251,9 @@ function App() {
           </p>
         </div>
 
+        <p className="data-action-help" role="note">
+          Import requires genuine Elexon source files. Click “Import historical data” to choose the actuals file, click it again to choose the forecast file, then click it once more to upload both. “Refresh from Elexon” attempts a direct source fetch.
+        </p>
         {importMessage && (
           <div className="alert alert-info" role="status">{importMessage}</div>
         )}
