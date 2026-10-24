@@ -457,6 +457,20 @@ body {
   color: var(--color-gray-600);
 }
 
+.data-action-help {
+  margin-bottom: var(--spacing-md);
+  color: var(--color-gray-600);
+  font-size: 0.875rem;
+  line-height: 1.5;
+}
+
+.file-pickers .btn {
+  max-width: 260px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .header-actions {
   display: flex;
   align-items: center;
