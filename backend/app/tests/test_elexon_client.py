@@ -11,7 +11,7 @@ class TestElexonClient:
 
     def test_get_fuelhh_success(self, client):
         with requests_mock.Mocker() as m:
-            m.get("https://test.api/datasets/FUELHH", json={
+            m.get("https://test.api/datasets/FUELHH/stream", json={
                 "data": [
                     {"dataset": "FUELHH", "settlementDate": "2026-01-15", "settlementPeriod": 1,
                      "startTime": "2026-01-15T00:00:00Z", "publishTime": "2026-01-14T10:00:00Z",
@@ -25,7 +25,7 @@ class TestElexonClient:
 
     def test_get_fuelhh_wind_only_filters(self, client):
         with requests_mock.Mocker() as m:
-            m.get("https://test.api/datasets/FUELHH", json={
+            m.get("https://test.api/datasets/FUELHH/stream", json={
                 "data": [
                     {"dataset": "FUELHH", "settlementDate": "2026-01-15", "settlementPeriod": 1,
                      "startTime": "2026-01-15T00:00:00Z", "publishTime": "2026-01-14T10:00:00Z",
@@ -41,7 +41,7 @@ class TestElexonClient:
 
     def test_get_windfor_success(self, client):
         with requests_mock.Mocker() as m:
-            m.get("https://test.api/datasets/WINDFOR", json={
+            m.get("https://test.api/datasets/WINDFOR/stream", json={
                 "data": [
                     {"dataset": "WINDFOR", "settlementDate": "2026-01-15", "settlementPeriod": 1,
                      "startTime": "2026-01-15T00:00:00Z", "publishTime": "2026-01-14T10:00:00Z",
@@ -52,21 +52,34 @@ class TestElexonClient:
             assert len(result) == 1
             assert result[0]["generation"] == 1000
 
+    def test_query_uses_publication_time_parameters(self, client):
+        with requests_mock.Mocker() as m:
+            m.get("https://test.api/datasets/WINDFOR/stream", json=[])
+            client.get_windfor(
+                start_time="2026-01-01T00:00:00Z",
+                end_time="2026-01-01T12:00:00Z",
+            )
+            request = m.last_request
+            assert request.qs["publishDateTimeFrom"] == ["2026-01-01T00:00:00Z"]
+            assert request.qs["publishDateTimeTo"] == ["2026-01-01T12:00:00Z"]
+            assert "startTime" not in request.qs
+            assert "endTime" not in request.qs
+
     def test_http_error_raises(self, client):
         with requests_mock.Mocker() as m:
-            m.get("https://test.api/datasets/FUELHH", status_code=500)
+            m.get("https://test.api/datasets/FUELHH/stream", status_code=500)
             with pytest.raises(ElexonAPIError):
                 client.get_fuelhh()
 
     def test_timeout_raises(self, client):
         with requests_mock.Mocker() as m:
-            m.get("https://test.api/datasets/FUELHH", exc=requests.Timeout)
+            m.get("https://test.api/datasets/FUELHH/stream", exc=requests.Timeout)
             with pytest.raises(ElexonAPIError):
                 client.get_fuelhh()
 
     def test_invalid_json_raises(self, client):
         with requests_mock.Mocker() as m:
-            m.get("https://test.api/datasets/FUELHH", text="not json")
+            m.get("https://test.api/datasets/FUELHH/stream", text="not json")
             with pytest.raises(ElexonAPIError):
                 client.get_fuelhh()
 
