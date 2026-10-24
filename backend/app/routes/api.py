@@ -64,6 +64,38 @@ def health():
     })
 
 
+def _generate_warnings(metrics: dict, mape_result: dict) -> list:
+    """Explain missing or incomplete evaluation data without failing the summary API."""
+    warnings = []
+    total = int(metrics.get("total_intervals") or 0)
+    matched = int(metrics.get("matched_intervals") or 0)
+    with_actual = int(metrics.get("intervals_with_actual") or 0)
+    with_forecast = int(metrics.get("intervals_with_forecast") or 0)
+    valid_mape_observations = int(mape_result.get("valid_observations") or 0)
+
+    if total == 0:
+        warnings.append(
+            "No evaluation data available for this period. Import genuine Elexon actuals and forecasts or refresh the source data."
+        )
+    elif matched == 0:
+        warnings.append("No matched intervals; forecast accuracy metrics cannot be calculated.")
+    elif with_actual and matched < with_actual * 0.5:
+        warnings.append(
+            f"Low evaluation coverage: {matched}/{with_actual} actual intervals have both actual and eligible forecast data."
+        )
+
+    if with_actual == 0:
+        warnings.append("No actual wind generation data is available for this period.")
+    if with_forecast == 0:
+        warnings.append("No eligible forecast data is available for this period.")
+    if valid_mape_observations == 0:
+        warnings.append(
+            f"MAPE is unavailable because no matched actual values exceed the {config.MAPE_EXCLUSION_THRESHOLD:g} MW exclusion threshold."
+        )
+
+    return warnings
+
+
 @api_bp.route("/summary", methods=["GET"])
 def summary():
     month = request.args.get("month", "2026-01")
