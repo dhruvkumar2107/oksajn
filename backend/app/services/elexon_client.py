@@ -1,4 +1,5 @@
 import logging
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
@@ -120,16 +121,33 @@ class ElexonClient:
         if end <= cursor:
             raise ValueError("end_time must be later than start_time")
 
-        records = []
+        # Each dataset stream accepts publication-time windows of up to one day.
+        # Fetch the windows concurrently so a month-backfill does not spend a
+        # separate network round-trip on every day (Render request timeouts can
+        # otherwise abort the refresh before any rows are persisted).
+        windows = []
         while cursor < end:
             chunk_end = min(cursor + timedelta(hours=24), end)
-            params = {
+            windows.append({
                 **extra,
                 "publishDateTimeFrom": _iso_z(cursor),
                 "publishDateTimeTo": _iso_z(chunk_end),
-            }
-            records.extend(self._make_request(endpoint, params))
+            })
             cursor = chunk_end
+
+        max_workers = max(1, min(int(config.ELEXON_MAX_CONCURRENCY), len(windows)))
+        if max_workers == 1:
+            records = []
+            for params in windows:
+                records.extend(self._make_request(endpoint, params))
+        else:
+            # pool.map preserves window order; each task is a read-only GET.
+            with ThreadPoolExecutor(max_workers=max_workers) as pool:
+                batches = list(pool.map(
+                    lambda params: self._make_request(endpoint, params),
+                    windows,
+                ))
+            records = [record for batch in batches for record in batch]
 
         # A boundary record can appear in adjacent windows; preserve unique
         # source records while keeping distinct forecast publication vintages.
