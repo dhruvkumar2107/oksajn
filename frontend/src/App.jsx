@@ -212,8 +212,8 @@ function App() {
         <div>
           <h1 className="page-title">Executive Overview — January 2026</h1>
           <p className="page-description">
-            Wind generation forecast accuracy for day-ahead procurement decisions. 
-            Evaluation uses the latest eligible forecast published at or before 11:00 UK time on the day before delivery.
+            Wind generation forecast accuracy for day-ahead procurement decisions.
+            Evaluation uses the latest eligible forecast published at or before the configured UK decision cutoff on the day before delivery.
           </p>
         </div>
 
@@ -275,7 +275,7 @@ function App() {
                            key === 'rmse_mw' ? 'RMSE = sqrt(mean((forecast - actual)²))' :
                            key === 'bias_mw' ? 'Bias = mean(forecast - actual)' :
                            key === 'mape_percent' ? 'MAPE = mean(|forecast - actual| / |actual|) × 100 (excl. near-zero actuals)' :
-                           'Coverage = matched / total intervals',
+                           'Coverage = matched intervals / actual intervals available × 100',
                   caveat: metric.caveat || 'These metrics evaluate wind forecast accuracy only. They do not determine optimal procurement quantities.'
                 }}
               />
