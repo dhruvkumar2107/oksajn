@@ -71,3 +71,43 @@ jobs:
           ELEXON_MAX_CONCURRENCY: "6"
           ELEXON_TIMEOUT: "20"
           ELEXON_MAX_RETRIES: "1"
+
+      - name: Backfill deployed dashboard and verify live summary
+        run: |
+          python - <<'PY'
+          import json
+          import urllib.error
+          import urllib.request
+
+          base = "https://oksajn.onrender.com/api"
+
+          def get_json(url, timeout=30):
+              request = urllib.request.Request(url, headers={"User-Agent": "WindSight-live-backfill/1.0"})
+              with urllib.request.urlopen(request, timeout=timeout) as response:
+                  return json.loads(response.read().decode("utf-8"))
+
+          health = get_json(base + "/health")
+          print("LIVE_BACKEND_HEALTH=" + json.dumps(health))
+          payload = json.dumps({"start_date": "2026-01-01", "end_date": "2026-02-01"}).encode("utf-8")
+          request = urllib.request.Request(
+              base + "/refresh",
+              data=payload,
+              method="POST",
+              headers={"Content-Type": "application/json", "User-Agent": "WindSight-live-backfill/1.0"},
+          )
+          try:
+              with urllib.request.urlopen(request, timeout=300) as response:
+                  result = json.loads(response.read().decode("utf-8"))
+                  print("LIVE_REFRESH_STATUS=" + str(response.status))
+                  print("LIVE_REFRESH_RESULT=" + json.dumps(result))
+          except urllib.error.HTTPError as exc:
+              detail = exc.read().decode("utf-8", errors="replace")
+              print("LIVE_REFRESH_HTTP_ERROR=" + str(exc.code) + " " + detail)
+              raise
+          summary = get_json(base + "/summary?month=2026-01")
+          print("LIVE_JANUARY_SUMMARY=" + json.dumps(summary))
+          coverage = summary.get("coverage", {})
+          assert coverage.get("total_intervals", 0) > 0, "Live dashboard still has no evaluation rows"
+          assert coverage.get("intervals_with_actual", 0) > 0, "Live dashboard still has no actual data"
+          assert coverage.get("intervals_with_forecast", 0) > 0, "Live dashboard still has no eligible forecasts"
+          PY
