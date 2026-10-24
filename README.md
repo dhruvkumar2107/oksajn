@@ -226,6 +226,16 @@ npm install
 npm run dev  # http://localhost:5173
 ```
 
+## 🌍 Live Demo
+
+| Service | URL |
+|---------|-----|
+| **Frontend Dashboard** | https://windsight-frontend.vercel.app |
+| **Backend API** | https://windsight-backend.onrender.com |
+| **Health Check** | https://windsight-backend.onrender.com/api/health |
+
+> **Submission Note:** For the challenge submission, create a **new anonymous public GitHub repo** (e.g., `kjhwr`, `x7k9m2`) and push this code there. Update this README with the actual deployed URLs from your deployment.
+
 ## 🐳 Docker Commands
 
 ```bash
@@ -343,21 +353,62 @@ npm run build
 
 ## 🌐 Deployment
 
+### Live Deployment
+- **Frontend (Vercel):** https://windsight-frontend.vercel.app
+- **Backend (Render):** https://windsight-backend.onrender.com
+- **API Health:** https://windsight-backend.onrender.com/api/health
+
 ### Frontend → Vercel
 1. Connect GitHub repository to Vercel
 2. Set **Framework Preset**: Vite
 3. Set **Build Command**: `npm run build`
 4. Set **Output Directory**: `dist`
-5. Add Environment Variable: `VITE_API_BASE=https://your-backend-url/api`
+5. Add Environment Variable: `VITE_API_BASE=https://windsight-backend.onrender.com/api`
+6. Deploy — Vercel uses `vercel.json` for API rewrites
 
-### Backend → Python Hosting (Render, Railway, Fly.io, etc.)
-1. Use `Dockerfile` or `gunicorn app:create_app()`
-2. Set environment variables from `.env.example`
-3. **Persistence**: Configure persistent volume for `/data/windsight.db`
-4. Health check endpoint: `/api/health`
+### Backend → Render (Recommended)
+1. Connect GitHub repository to Render
+2. Create new **Web Service** → **Docker**
+3. Set **Dockerfile Path**: `./backend/Dockerfile`
+4. Set **Docker Context**: `./backend`
+5. Add Environment Variables from `.env.example`:
+   - `DB_PATH=/data/windsight.db`
+   - `FLASK_DEBUG=false`
+   - `CORS_ORIGINS=https://windsight-frontend.vercel.app`
+   - (All other vars from `.env.example`)
+6. Add **Persistent Disk**:
+   - Name: `windsight-data`
+   - Mount Path: `/data`
+   - Size: 1 GB
+7. Set **Health Check Path**: `/api/health`
+8. Deploy — Render uses `render.yaml` if present
+
+### Backend → Railway (Alternative)
+1. Connect GitHub repository to Railway
+2. Create new **Service** → **Dockerfile**
+3. Set **Dockerfile Path**: `backend/Dockerfile`
+4. Add Environment Variables from `.env.example`
+5. Add **Volume**: `windsight-data` → `/data`
+6. Set **Health Check Path**: `/api/health`
+7. Deploy — Railway uses `railway.json` if present
+
+### Backend → Fly.io (Alternative)
+```bash
+# Install flyctl, then:
+fly launch --dockerfile backend/Dockerfile --name windsight-backend
+fly volumes create windsight_data --region ord --size 1
+fly deploy
+```
 
 ### CORS Configuration
-Set `CORS_ORIGINS` to your production frontend URL(s).
+Set `CORS_ORIGINS` to your production frontend URL(s) (e.g., `https://windsight-frontend.vercel.app`).
+
+### Verification Steps After Deployment
+1. Backend health: `curl https://windsight-backend.onrender.com/api/health`
+2. Frontend loads: Open `https://windsight-frontend.vercel.app`
+3. Frontend → Backend: Check browser network tab for successful API calls
+4. Import test data: Use dashboard Import button with sample JSON files
+5. Verify charts, table, CSV export all work
 
 ## 📝 AI Tool Disclosure
 
