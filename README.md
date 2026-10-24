@@ -1,0 +1,404 @@
+# WindSight | Day-Ahead Analytics
+
+A production-quality pilot application for UK energy utilities to evaluate day-ahead wind generation forecast accuracy against actual generation, supporting informed electricity procurement decisions.
+
+## 📋 Overview
+
+WindSight helps procurement teams at UK electricity utilities understand:
+- **Latest eligible national wind forecasts** available at purchasing decision time
+- **Forecast accuracy metrics** (MAE, RMSE, Bias, MAPE) using genuine Elexon data
+- **Forecast overestimation/underestimation patterns** for risk management
+- **Interval-level audit trails** with forecast publication timestamps for transparency
+
+## 🎯 Business Problem
+
+UK electricity utilities buy power on the wholesale day-ahead market (EPEX SPOT, Nord Pool). Wind generation reduces the volume that must be purchased. Procurement teams need to know:
+1. How much wind generation is forecast for each delivery interval
+2. Which forecast vintage was available when they made purchasing decisions
+3. How accurate those forecasts have been historically
+
+WindSight provides this analysis using only **official Elexon BMRS datasets**, ensuring regulatory alignment and data integrity.
+
+## 📊 Data Sources
+
+| Dataset | Elexon Endpoint | Purpose |
+|---------|----------------|---------|
+| **FUELHH** | `/datasets/FUELHH` | Actual wind generation (half-hourly, `fuelType=WIND`) |
+| **WINDFOR** | `/datasets/WINDFOR` | Forecast wind generation with publication timestamps |
+
+**Official Documentation:**
+- [FUELHH Dataset](https://bmrs.elexon.co.uk/api-documentation/endpoint/datasets/FUELHH/stream)
+- [WINDFOR Dataset](https://bmrs.elexon.co.uk/api-documentation/endpoint/datasets/WINDFOR/stream)
+
+## 🛠 Technology Stack
+
+| Layer | Technology |
+|-------|------------|
+| Frontend | React 18 + Vite 5 |
+| Backend | Python 3.11 + Flask 3 |
+| Data Processing | Pandas 2 + NumPy 1.26 |
+| Charts | Recharts 2 |
+| Database | SQLite 3 |
+| HTTP Client | Python Requests |
+| Testing | pytest 8 + requests-mock |
+| Containerization | Docker + Docker Compose |
+| Deployment | Vercel (frontend) + Python hosting (backend) |
+
+## 🏗 Architecture
+
+```
+┌─────────────────┐     ┌─────────────────┐     ┌─────────────────┐
+│   React UI      │────▶│   Flask API     │────▶│   SQLite DB     │
+│   (Port 80)     │     │   (Port 5000)   │     │   (Volume)      │
+└─────────────────┘     └────────┬────────┘     └─────────────────┘
+                                 │
+                    ┌────────────┴────────────┐
+                    ▼                         ▼
+            ┌───────────────┐         ┌───────────────┐
+            │ Elexon FUELHH │         │ Elexon WINDFOR│
+            │   (Actuals)   │         │  (Forecasts)  │
+            └───────────────┘         └───────────────┘
+```
+
+### Data Flow
+
+1. **Ingestion**: Fetch actuals (FUELHH, filtered to WIND) and forecasts (WINDFOR) from Elexon API
+2. **Normalization**: Parse timestamps to UTC, convert to `Europe/London` for cutoff logic
+3. **Forecast Selection**: For each delivery interval, select the latest forecast with `publishTime ≤ decision_cutoff`
+4. **Evaluation**: Join actuals with selected forecasts, calculate signed errors
+5. **Storage**: Persist raw data, selected forecasts, and evaluation results in SQLite
+6. **API**: Serve aggregated metrics, time-series data, and paginated interval records
+7. **UI**: Render KPI cards, interactive charts, and audit table with CSV export
+
+## 📁 Repository Structure
+
+```
+windsight/
+├── backend/
+│   ├── app/
+│   │   ├── __init__.py          # Flask app factory
+│   │   ├── config.py            # Configuration (cutoff, thresholds, etc.)
+│   │   ├── models/__init__.py   # SQLite schema & data access
+│   │   ├── routes/
+│   │   │   └── api.py           # REST endpoints
+│   │   ├── services/
+│   │   │   ├── elexon_client.py # API client with retries/timeouts
+│   │   │   └── data_processor.py # Normalization, selection, metrics
+│   │   └── tests/
+│   │       ├── conftest.py
+│   │       ├── test_data_processor.py
+│   │       └── test_elexon_client.py
+│   ├── requirements.txt
+│   └── Dockerfile
+├── frontend/
+│   ├── src/
+│   │   ├── components/
+│   │   │   ├── Charts.jsx       # Recharts components
+│   │   │   ├── KPICards.jsx     # Metric display cards
+│   │   │   └── IntervalTable.jsx # Paginated audit table
+│   │   ├── pages/
+│   │   ├── services/
+│   │   │   └── api.js           # API client & formatters
+│   │   ├── App.jsx              # Main dashboard
+│   │   ├── main.jsx             # Entry point
+│   │   └── styles.css           # Design system
+│   ├── package.json
+│   ├── vite.config.js
+│   ├── Dockerfile
+│   └── nginx.conf
+├── docker-compose.yml
+├── .env.example
+├── .dockerignore
+├── .gitignore
+└── README.md
+```
+
+## ⚙️ Forecast Vintage Selection Logic
+
+**Critical Business Rule:** For each delivery interval, select the **latest forecast published at or before the procurement decision cutoff**.
+
+```python
+decision_cutoff = delivery_date - 1 day at 11:00 UK time
+selected_forecast = max(forecasts.where(publishTime <= decision_cutoff), key=publishTime)
+```
+
+### Decision Cutoff Assumption
+
+- **Cutoff:** 11:00 UK time on the day before delivery (D-1)
+- **Justification:** Based on EPEX SPOT day-ahead auction timeline (gate closure ~11:00 UK for next-day delivery)
+- **Configurable:** `DECISION_CUTOFF_HOUR` and `DECISION_CUTOFF_MINUTE` in `.env`
+- **Timezone:** All timestamps normalized to `Europe/London` (handles BST/GMT transitions)
+
+### Example
+
+| Delivery Interval | Forecast A Published | Forecast B Published | Forecast C Published | Selected |
+|-------------------|---------------------|---------------------|---------------------|----------|
+| 2026-01-15 00:00  | 2026-01-14 09:00    | 2026-01-14 10:30    | 2026-01-14 11:30    | **B** (latest ≤ 11:00) |
+
+Forecasts published after the cutoff (e.g., C at 11:30) are **excluded** — they were not available to the buyer.
+
+## 📈 Error Sign Convention
+
+```
+error_MW = forecast_generation_MW - actual_generation_MW
+```
+
+| Error Sign | Interpretation |
+|------------|----------------|
+| **Positive** | Wind generation **overestimated** (procurement may have bought too little) |
+| **Negative** | Wind generation **underestimated** (procurement may have bought too much) |
+| **Zero** | Forecast matched actual |
+
+## 📐 Accuracy Metrics
+
+| Metric | Formula | Interpretation |
+|--------|---------|----------------|
+| **MAE** | `mean(|forecast - actual|)` | Average absolute error (MW) |
+| **RMSE** | `sqrt(mean((forecast - actual)²))` | Penalizes large errors more heavily |
+| **Bias** | `mean(forecast - actual)` | Systematic tendency (+ve = overestimation) |
+| **MAPE** | `mean(|forecast - actual| / |actual|) × 100` | Percentage error (excludes actuals ≤ 1 MW) |
+| **Coverage** | `matched_intervals / total_intervals` | Data completeness for evaluation |
+
+All metrics calculated **only on matched intervals** with both actual and eligible forecast.
+
+## 📅 Historical Data Coverage & Limitations
+
+**Important:** The Elexon public API (`https://data.elexon.co.uk/bmrs/api/v1`) **does not support historical queries** — it returns only the most recent data regardless of date parameters.
+
+### Current Status
+- ✅ Live API integration works for current data
+- ❌ Historical January 2026 data **not accessible via API**
+- ✅ Import workflow provided for genuine Elexon JSON/CSV files
+
+### Importing Historical Data
+
+1. Obtain genuine Elexon data files (JSON or CSV) for January 2026
+2. Use the dashboard's **Import** button or call `POST /api/import`:
+   ```bash
+   curl -X POST -F "actual_file=@fuelhh_jan2026.json" \
+              -F "forecast_file=@windfor_jan2026.json" \
+              http://localhost:5000/api/import
+   ```
+3. Dashboard will show actual coverage and metrics once imported
+
+**Never fabricate historical data.** The dashboard displays clear empty states when genuine data is unavailable.
+
+## 🚀 Quick Start
+
+### Prerequisites
+- Docker 24+ and Docker Compose 2+
+- Or: Python 3.11+, Node 20+
+
+### With Docker (Recommended)
+
+```bash
+# Clone and navigate
+git clone <repository-url>
+cd windsight
+
+# Copy environment config
+cp .env.example .env
+
+# Build and start
+docker compose up --build
+
+# Access
+# Frontend: http://localhost
+# Backend API: http://localhost:5000/api/health
+```
+
+### Without Docker
+
+**Backend:**
+```bash
+cd backend
+python -m venv .venv
+source .venv/bin/activate  # Windows: .venv\Scripts\activate
+pip install -r requirements.txt
+cp ../.env.example .env
+python -m app
+```
+
+**Frontend:**
+```bash
+cd frontend
+npm install
+npm run dev  # http://localhost:5173
+```
+
+## 🐳 Docker Commands
+
+```bash
+# Start services
+docker compose up --build
+
+# Stop services
+docker compose down
+
+# Stop and remove volumes (resets database)
+docker compose down -v
+
+# View logs
+docker compose logs -f backend
+docker compose logs -f frontend
+
+# Run backend tests in container
+docker compose exec backend python -m pytest app/tests/ -v
+
+# Access backend shell
+docker compose exec backend bash
+```
+
+## 🔧 Environment Variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `DB_PATH` | `/data/windsight.db` | SQLite database path |
+| `ELEXON_BASE_URL` | `https://data.elexon.co.uk/bmrs/api/v1` | Elexon API base |
+| `ELEXON_TIMEOUT` | `30` | Request timeout (seconds) |
+| `ELEXON_MAX_RETRIES` | `3` | Retry attempts for transient errors |
+| `DECISION_CUTOFF_HOUR` | `11` | Procurement cutoff hour (UK) |
+| `DECISION_CUTOFF_MINUTE` | `0` | Procurement cutoff minute |
+| `DECISION_CUTOFF_TIMEZONE` | `Europe/London` | Cutoff timezone |
+| `MAPE_EXCLUSION_THRESHOLD` | `1.0` | MW threshold for MAPE exclusion |
+| `CORS_ORIGINS` | `http://localhost:5173,...` | Allowed frontend origins |
+| `VITE_API_BASE` | `/api` | Frontend API base URL |
+
+## 📡 API Reference
+
+### Health Check
+```
+GET /api/health
+```
+
+### Summary Metrics
+```
+GET /api/summary?month=2026-01
+```
+Returns KPIs, coverage, and data quality warnings.
+
+### Forecast vs Actual Time Series
+```
+GET /api/forecasts?start=2026-01-01T00:00:00Z&end=2026-02-01T00:00:00Z
+```
+Returns matched intervals with actual, forecast, error, and forecast publish time.
+
+### Accuracy Metrics Detail
+```
+GET /api/accuracy?month=2026-01
+```
+Returns all metrics with formulas, sample counts, and plain-English interpretations.
+
+### Interval Audit Table (Paginated)
+```
+GET /api/intervals?start=2026-01-01T00:00:00Z&end=2026-02-01T00:00:00Z&page=1&page_size=50
+```
+
+### CSV Export
+```
+GET /api/intervals/export?start=...&end=...
+```
+
+### Refresh from Live API
+```
+POST /api/refresh
+Content-Type: application/json
+{"start_date": "2026-01-01", "end_date": "2026-02-01"}
+```
+
+### Import Historical Data
+```
+POST /api/import
+Content-Type: multipart/form-data
+actual_file: <JSON file>
+forecast_file: <JSON file>
+start_date: 2026-01-01
+end_date: 2026-02-01
+```
+
+## 🧪 Testing
+
+```bash
+# Backend tests
+cd backend
+python -m pytest app/tests/ -v
+
+# Frontend build verification
+cd frontend
+npm run build
+```
+
+### Test Coverage
+- Timestamp parsing & timezone normalization
+- WIND-only actual filtering
+- Delivery interval matching
+- Forecast vintage selection (cutoff logic)
+- Duplicate publication handling
+- Missing actuals/forecasts
+- Error sign convention
+- MAE, RMSE, Bias, MAPE calculations
+- Empty/zero datasets
+- Coverage calculations
+- API error handling (timeouts, HTTP errors, invalid JSON)
+
+## 🌐 Deployment
+
+### Frontend → Vercel
+1. Connect GitHub repository to Vercel
+2. Set **Framework Preset**: Vite
+3. Set **Build Command**: `npm run build`
+4. Set **Output Directory**: `dist`
+5. Add Environment Variable: `VITE_API_BASE=https://your-backend-url/api`
+
+### Backend → Python Hosting (Render, Railway, Fly.io, etc.)
+1. Use `Dockerfile` or `gunicorn app:create_app()`
+2. Set environment variables from `.env.example`
+3. **Persistence**: Configure persistent volume for `/data/windsight.db`
+4. Health check endpoint: `/api/health`
+
+### CORS Configuration
+Set `CORS_ORIGINS` to your production frontend URL(s).
+
+## 📝 AI Tool Disclosure
+
+This project was developed with assistance from:
+- **GitHub Copilot** (code completion, boilerplate generation)
+- **Claude 3.5 Sonnet** (architecture design, complex logic implementation, test writing)
+
+All code was reviewed, tested, and verified by the human developer. AI tools were used as coding assistants, not as autonomous agents.
+
+## ⚠️ Known Limitations
+
+1. **Historical API Access**: Elexon public API doesn't support date-filtered historical queries
+2. **Single Cutoff**: Uses fixed 11:00 UK cutoff; real market has multiple gate closures
+3. **National Only**: No regional/zonal wind breakdown
+4. **No Demand Data**: Procurement decisions need demand forecasts (out of scope)
+5. **No Balancing Costs**: Imbalance pricing not modeled
+6. **SQLite Concurrency**: Not suitable for high-concurrency production use
+
+## 🔮 Future Improvements
+
+- [ ] Support for Elexon historical data API (when available)
+- [ ] Multiple cutoff scenarios (gate closure sensitivity analysis)
+- [ ] Regional wind forecasts (BNGC, WINDZONE)
+- [ ] Demand forecast integration
+- [ ] Balancing mechanism cost modeling
+- [ ] PostgreSQL for production deployment
+- [ ] Authentication & multi-user support
+- [ ] Automated scheduled data refresh
+
+## 📜 License
+
+MIT License — See LICENSE file for details.
+
+## 🤝 Contributing
+
+1. Fork the repository
+2. Create a feature branch
+3. Make changes with tests
+4. Run `docker compose up --build` and verify
+5. Submit a pull request
+
+---
+
+**Built for the UK energy market. Not for operational use without independent validation.**

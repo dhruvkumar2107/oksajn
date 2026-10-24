@@ -1,0 +1,75 @@
+import pytest
+import requests
+import requests_mock
+from app.services.elexon_client import ElexonClient, ElexonAPIError
+
+
+class TestElexonClient:
+    @pytest.fixture
+    def client(self):
+        return ElexonClient(base_url="https://test.api", timeout=5, max_retries=0)
+
+    def test_get_fuelhh_success(self, client):
+        with requests_mock.Mocker() as m:
+            m.get("https://test.api/datasets/FUELHH", json={
+                "data": [
+                    {"dataset": "FUELHH", "settlementDate": "2026-01-15", "settlementPeriod": 1,
+                     "startTime": "2026-01-15T00:00:00Z", "publishTime": "2026-01-14T10:00:00Z",
+                     "fuelType": "WIND", "generation": 1000}
+                ]
+            })
+            result = client.get_fuelhh(settlement_date="2026-01-15")
+            assert len(result) == 1
+            assert result[0]["fuelType"] == "WIND"
+            assert result[0]["generation"] == 1000
+
+    def test_get_fuelhh_wind_only_filters(self, client):
+        with requests_mock.Mocker() as m:
+            m.get("https://test.api/datasets/FUELHH", json={
+                "data": [
+                    {"dataset": "FUELHH", "settlementDate": "2026-01-15", "settlementPeriod": 1,
+                     "startTime": "2026-01-15T00:00:00Z", "publishTime": "2026-01-14T10:00:00Z",
+                     "fuelType": "WIND", "generation": 1000},
+                    {"dataset": "FUELHH", "settlementDate": "2026-01-15", "settlementPeriod": 1,
+                     "startTime": "2026-01-15T00:00:00Z", "publishTime": "2026-01-14T10:00:00Z",
+                     "fuelType": "CCGT", "generation": 500},
+                ]
+            })
+            result = client.get_fuelhh_wind_only(settlement_date="2026-01-15")
+            assert len(result) == 1
+            assert result[0]["fuelType"] == "WIND"
+
+    def test_get_windfor_success(self, client):
+        with requests_mock.Mocker() as m:
+            m.get("https://test.api/datasets/WINDFOR", json={
+                "data": [
+                    {"dataset": "WINDFOR", "settlementDate": "2026-01-15", "settlementPeriod": 1,
+                     "startTime": "2026-01-15T00:00:00Z", "publishTime": "2026-01-14T10:00:00Z",
+                     "generation": 1000}
+                ]
+            })
+            result = client.get_windfor(settlement_date="2026-01-15")
+            assert len(result) == 1
+            assert result[0]["generation"] == 1000
+
+    def test_http_error_raises(self, client):
+        with requests_mock.Mocker() as m:
+            m.get("https://test.api/datasets/FUELHH", status_code=500)
+            with pytest.raises(ElexonAPIError):
+                client.get_fuelhh()
+
+    def test_timeout_raises(self, client):
+        with requests_mock.Mocker() as m:
+            m.get("https://test.api/datasets/FUELHH", exc=requests.Timeout)
+            with pytest.raises(ElexonAPIError):
+                client.get_fuelhh()
+
+    def test_invalid_json_raises(self, client):
+        with requests_mock.Mocker() as m:
+            m.get("https://test.api/datasets/FUELHH", text="not json")
+            with pytest.raises(ElexonAPIError):
+                client.get_fuelhh()
+
+    def test_context_manager(self):
+        with ElexonClient(base_url="https://test.api") as client:
+            assert client.session is not None

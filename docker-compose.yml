@@ -1,0 +1,43 @@
+version: '3.8'
+
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: windsight-backend
+    ports:
+      - "5000:5000"
+    environment:
+      - DB_PATH=/data/windsight.db
+      - FLASK_DEBUG=false
+      - PYTHONUNBUFFERED=1
+    volumes:
+      - windsight-data:/data
+    healthcheck:
+      test: ["CMD", "python", "-c", "import requests; requests.get('http://localhost:5000/api/health', timeout=5)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: windsight-frontend
+    ports:
+      - "80:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  windsight-data:
+    driver: local
+
+networks:
+  default:
+    name: windsight-network
