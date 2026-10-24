@@ -2,10 +2,23 @@ import React from 'react';
 import { formatMW, formatNumber, formatPercent } from '../services/api';
 
 export function KPICard({ title, value, subtitle, variant, unit }) {
-  const formattedValue = value === null || value === undefined || isNaN(value) ? '—' : 
-    (unit === 'MW' ? formatMW(value) : 
-     unit === '%' ? formatPercent(value) : 
-     formatNumber(value));
+  const numericValue = typeof value === 'number'
+    ? Number.isFinite(value)
+    : typeof value === 'string' && value.trim() !== '' && Number.isFinite(Number(value));
+
+  let formattedValue = '—';
+  if (value !== null && value !== undefined && value !== '') {
+    if (numericValue) {
+      formattedValue = unit === 'MW'
+        ? formatMW(Number(value))
+        : unit === '%'
+          ? formatPercent(Number(value))
+          : formatNumber(Number(value));
+    } else if (!unit) {
+      // Some cards display non-numeric metadata such as the last refresh time.
+      formattedValue = String(value);
+    }
+  }
 
   return (
     <div className="card">
