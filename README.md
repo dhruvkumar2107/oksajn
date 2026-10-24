@@ -434,7 +434,13 @@ The assignment requires one **unlisted YouTube video no longer than 10 minutes**
 
 A ready-to-record script and checklist are provided in [docs/VIDEO_DEMO_SCRIPT.md](docs/VIDEO_DEMO_SCRIPT.md). The script does not count as the video deliverable: record the screen and narration, upload the video as **Unlisted**, and verify it opens in an incognito window before submitting.
 
-**Submission form:** [Full Stack SWE challenge submission v4](https://forms.cloud.microsoft/r/Ljmf1aWESK). Complete the form after the unlisted video, public repository, and live app links have been verified. This README does not claim the form or YouTube upload has been completed.
+**Submission form:** [Full Stack SWE challenge submission v4](https://forms.cloud.microsoft/r/Ljmf1aWESK). Before submitting, open each link below in an incognito/private window and confirm that it loads without signing in:
+- Frontend: https://frontend-95b6.vercel.app
+- Backend health: https://oksajn.onrender.com/api/health
+- Public repository: https://github.com/dhruvkumar2107/oksajn
+- Your unlisted YouTube video URL
+
+Complete the form only after the video has actually been recorded, uploaded as **Unlisted**, and verified. The video and form submission are not claimed as completed by this repository update.
 
 ## 📝 AI Tool Disclosure
 
