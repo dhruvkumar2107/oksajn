@@ -124,11 +124,12 @@ selected_forecast = max(forecasts.where(publishTime <= decision_cutoff), key=pub
 
 ### Decision Cutoff Assumption
 
-- **Cutoff:** 11:00 UK time on the day before delivery (D-1)
-- **Justification:** Based on EPEX SPOT day-ahead auction timeline (gate closure ~11:00 UK for next-day delivery)
-- **Configurable:** `DECISION_CUTOFF_HOUR` and `DECISION_CUTOFF_MINUTE` in `.env`
-- **Timezone:** All timestamps normalized to `Europe/London` (handles BST/GMT transitions)
+- **Configured pilot cutoff:** 11:00 UK time on the day before delivery (D-1)
+- **Status:** A configurable engineering assumption, not a verified contractual or venue-wide deadline for every GB day-ahead participant.
+- **Configuration:** `DECISION_CUTOFF_HOUR`, `DECISION_CUTOFF_MINUTE`, and `DECISION_CUTOFF_TIMEZONE`
+- **Timezone:** `Europe/London`; the calculation uses the UK calendar day and local wall-clock time.
 
+**Important:** Confirm the customer's trading venue and actual procurement procedure before relying on this cutoff. A forecast's eligibility is only as correct as the cutoff assumption used. The application must preserve `publishTime` so reviewers can audit eligibility.
 ### Example
 
 | Delivery Interval | Forecast A Published | Forecast B Published | Forecast C Published | Selected |
