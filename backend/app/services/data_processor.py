@@ -214,7 +214,10 @@ def evaluate_forecasts(actuals: pd.DataFrame, forecasts: pd.DataFrame,
     if "has_forecast" not in forecasts.columns:
         forecasts["has_forecast"] = 1
 
-    actuals_cols = ["settlement_date", "settlement_period", "start_time_utc", "has_actual"]
+    # startTime is the assignment's primary delivery-interval key. Settlement
+    # labels are retained as metadata, but must not prevent a match when a source
+    # export has missing or inconsistent settlement labels for the same interval.
+    actuals_cols = ["start_time_utc", "settlement_date", "settlement_period", "has_actual"]
     actuals_gen_col = None
     if "actual_generation_mw" in actuals.columns:
         actuals_gen_col = "actual_generation_mw"
@@ -222,8 +225,8 @@ def evaluate_forecasts(actuals: pd.DataFrame, forecasts: pd.DataFrame,
         actuals_gen_col = "generation_mw"
     if actuals_gen_col:
         actuals_cols.append(actuals_gen_col)
-    
-    forecasts_cols = ["settlement_date", "settlement_period", "start_time_utc", "has_forecast"]
+
+    forecasts_cols = ["start_time_utc", "settlement_date", "settlement_period", "has_forecast"]
     forecast_gen_col = None
     if "selected_forecast_generation_mw" in forecasts.columns:
         forecast_gen_col = "selected_forecast_generation_mw"
@@ -246,7 +249,21 @@ def evaluate_forecasts(actuals: pd.DataFrame, forecasts: pd.DataFrame,
     if "publish_time_utc" in forecasts_key.columns:
         forecasts_key = forecasts_key.rename(columns={"publish_time_utc": "selected_forecast_publish_time_utc"})
 
-    merged = pd.merge(actuals_key, forecasts_key, on=["settlement_date", "settlement_period", "start_time_utc"], how="outer")
+    merged = pd.merge(
+        actuals_key, forecasts_key, on=["start_time_utc"], how="outer",
+        suffixes=("_actual", "_forecast"),
+        validate="one_to_one",
+    )
+    merged["settlement_date"] = merged["settlement_date_actual"].combine_first(
+        merged["settlement_date_forecast"]
+    )
+    merged["settlement_period"] = merged["settlement_period_actual"].combine_first(
+        merged["settlement_period_forecast"]
+    ).astype("Int64")
+    merged = merged.drop(
+        columns=["settlement_date_actual", "settlement_date_forecast",
+                 "settlement_period_actual", "settlement_period_forecast"]
+    )
 
     merged["has_actual"] = merged["has_actual"].fillna(0).astype(int)
     merged["has_eligible_forecast"] = merged["has_forecast"].fillna(0).astype(int)
