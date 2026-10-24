@@ -7,8 +7,5 @@
       "source": "/api/(.*)",
       "destination": "https://oksajn.onrender.com/api/$1"
     }
-  ],
-  "env": {
-    "VITE_API_BASE": "https://oksajn.onrender.com/api"
-  }
+  ]
 }
