@@ -163,25 +163,29 @@ All metrics calculated **only on matched intervals** with both actual and eligib
 
 ## 📅 Historical Data Coverage & Limitations
 
-**Important:** The Elexon public API (`https://data.elexon.co.uk/bmrs/api/v1`) **does not support historical queries** — it returns only the most recent data regardless of date parameters.
+**Do not assume that the public API is current-only.** The stream endpoints support publication-time filtering. These filters describe when a record was published, not the delivery interval represented by its `startTime`.
 
-### Current Status
-- ✅ Live API integration works for current data
-- ❌ Historical January 2026 data **not accessible via API**
-- ✅ Import workflow provided for genuine Elexon JSON/CSV files
+- FUELHH actuals: [official stream documentation](https://bmrs.elexon.co.uk/api-documentation/endpoint/datasets/FUELHH/stream)
+- WINDFOR forecasts: [official stream documentation](https://bmrs.elexon.co.uk/api-documentation/endpoint/datasets/WINDFOR/stream)
+- Historical view of latest wind forecasts: [latest endpoint](https://bmrs.elexon.co.uk/api-documentation/endpoint/forecast/generation/wind/latest) and [latest stream](https://bmrs.elexon.co.uk/api-documentation/endpoint/forecast/generation/wind/latest/stream)
+- Historical forecast history: [WINDFOR history endpoint](https://bmrs.elexon.co.uk/api-documentation/endpoint/forecast/generation/wind/history)
+- Historical forecast evolution: [WINDFOR evolution endpoint](https://bmrs.elexon.co.uk/api-documentation/endpoint/forecast/generation/wind/evolution)
 
-### Importing Historical Data
+The application queries the dataset stream endpoints using `publishDateTimeFrom` and `publishDateTimeTo`, then filters returned records to the requested **delivery** period using `startTime`. Requests are split into time windows to keep them bounded.
 
-1. Obtain genuine Elexon data files (JSON or CSV) for January 2026
-2. Use the dashboard's **Import** button or call `POST /api/import`:
-   ```bash
-   curl -X POST -F "actual_file=@fuelhh_jan2026.json" \
-              -F "forecast_file=@windfor_jan2026.json" \
-              http://localhost:5000/api/import
-   ```
-3. Dashboard will show actual coverage and metrics once imported
+**Important distinction:** the `/forecast/generation/wind/latest` view supplies the latest forecast for a historical delivery range; by itself it does not prove that every forecast vintage that existed at a past purchasing cutoff is available. This assignment requires the selected forecasts' original `publishTime` values. Check the imported/retrieved record coverage before treating the metrics as a full-period retrospective evaluation.
 
-**Never fabricate historical data.** The dashboard displays clear empty states when genuine data is unavailable.
+### Checking January 2026 data
+
+1. Use **Refresh from Elexon** to request the configured January 2026 period.
+2. Inspect the returned counts, errors, and the data-quality warnings in the dashboard/backend logs.
+3. If the official stream endpoint does not return complete historical data for the required period, obtain genuine Elexon export files from the official [Wind generation page](https://bmrs.elexon.co.uk/wind-generation) or documented historical endpoint and import them.
+4. Import an actual FUELHH file containing `startTime`, `generation`, and `fuelType` (WIND rows are enforced) and a WINDFOR file containing `startTime`, `publishTime`, and `generation`. JSON files may be arrays or objects with a `data` array. CSV files need the same source field headers.
+5. Confirm that delivery coverage runs from 2026-01-01 inclusive to 2026-02-01 exclusive, then inspect matched and unmatched intervals.
+
+The importer accepts JSON and CSV source exports. It validates the extension and the required record fields; it does not accept arbitrary URLs or filesystem paths. An import that contains no valid records is reported as an error. The application does not manufacture production records or synthetic accuracy results.
+
+Historical data retrieval is considered verified only when real January 2026 records, timestamps, and coverage have been inspected. If publication history cannot be recovered, state that limitation in the demo rather than presenting a later forecast as the forecast available at decision time.
 
 ## 🚀 Quick Start
 
@@ -363,8 +367,8 @@ npm run build
 2. Set **Framework Preset**: Vite
 3. Set **Build Command**: `npm run build`
 4. Set **Output Directory**: `dist`
-5. Add Environment Variable: `VITE_API_BASE=https://oksajn.onrender.com/api`
-6. Deploy — Vercel uses `vercel.json` for API rewrites
+5. Keep `VITE_API_BASE` unset in Vercel so the frontend uses the same-origin `/api` path.
+6. The `frontend/vercel.json` rewrite proxies `/api/*` to the Flask service, avoiding browser cross-origin requests. Redeploy and verify `/api/health` after changing the config.
 
 ### Backend → Render (Recommended)
 1. Connect GitHub repository to Render
@@ -401,7 +405,7 @@ fly deploy
 ```
 
 ### CORS Configuration
-Set `CORS_ORIGINS` to your production frontend URL(s) (e.g., `https://windsight-frontend.vercel.app`).
+The Vercel frontend uses the same-origin `/api` rewrite, so browser requests pass through Vercel to the backend. Keep backend CORS restricted to explicitly permitted origins if direct cross-origin clients are also needed. The backend's `CORS_ORIGINS` setting is environment-configurable.
 
 ### Verification Steps After Deployment
 1. Backend health: `curl https://windsight-backend.onrender.com/api/health`
@@ -412,15 +416,11 @@ Set `CORS_ORIGINS` to your production frontend URL(s) (e.g., `https://windsight-
 
 ## 📝 AI Tool Disclosure
 
-This project was developed with assistance from:
-- **GitHub Copilot** (code completion, boilerplate generation)
-- **Claude 3.5 Sonnet** (architecture design, complex logic implementation, test writing)
-
-All code was reviewed, tested, and verified by the human developer. AI tools were used as coding assistants, not as autonomous agents.
+ChatGPT was used to help plan the requirements, review implementation details, and identify defects during this assignment. Add any other coding assistants actually used while implementing the project. Do not list tools that were not used.
 
 ## ⚠️ Known Limitations
 
-1. **Historical API Access**: Elexon public API doesn't support date-filtered historical queries
+1. **Historical coverage must be verified**: dataset stream filters operate on publication time; the availability of all January 2026 forecast vintages depends on the response/export. The latest-only forecast endpoint alone is insufficient to reconstruct all vintage history.
 2. **Single Cutoff**: Uses fixed 11:00 UK cutoff; real market has multiple gate closures
 3. **National Only**: No regional/zonal wind breakdown
 4. **No Demand Data**: Procurement decisions need demand forecasts (out of scope)
@@ -429,7 +429,7 @@ All code was reviewed, tested, and verified by the human developer. AI tools wer
 
 ## 🔮 Future Improvements
 
-- [ ] Support for Elexon historical data API (when available)
+- [ ] Verify full WINDFOR vintage coverage using the official history/evolution endpoints and maintain a documented coverage report
 - [ ] Multiple cutoff scenarios (gate closure sensitivity analysis)
 - [ ] Regional wind forecasts (BNGC, WINDZONE)
 - [ ] Demand forecast integration
