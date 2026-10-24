@@ -2,6 +2,7 @@ import logging
 from datetime import datetime
 from flask import Blueprint, jsonify, request, current_app
 import pandas as pd
+from werkzeug.exceptions import HTTPException
 
 from ..models import (
     get_evaluation_results,
@@ -21,7 +22,13 @@ api_bp = Blueprint("api", __name__, url_prefix="/api")
 
 @api_bp.errorhandler(Exception)
 def handle_unexpected_api_error(error):
-    """Log the real exception server-side and keep HTML tracebacks out of API responses."""
+    """Keep API errors JSON; preserve normal HTTP statuses for expected HTTP exceptions."""
+    if isinstance(error, HTTPException):
+        return jsonify({
+            "error": error.name.lower().replace(" ", "_"),
+            "message": error.description,
+        }), error.code
+
     logger.exception("Unhandled API error: %s", error)
     return jsonify({
         "error": "internal_server_error",
