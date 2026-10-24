@@ -19,6 +19,26 @@ logger = logging.getLogger(__name__)
 api_bp = Blueprint("api", __name__, url_prefix="/api")
 
 
+def _safe_round(value, decimals=2):
+    if value is None or pd.isna(value):
+        return None
+    try:
+        return round(float(value), decimals)
+    except (TypeError, ValueError):
+        return None
+
+
+def _month_range(month: str) -> tuple[str, str]:
+    """Validate YYYY-MM and return an inclusive start/exclusive end date."""
+    parsed = datetime.strptime(month, "%Y-%m")
+    start_date = parsed.replace(day=1).date()
+    if parsed.month == 12:
+        end_date = parsed.replace(year=parsed.year + 1, month=1, day=1).date()
+    else:
+        end_date = parsed.replace(month=parsed.month + 1, day=1).date()
+    return start_date.isoformat(), end_date.isoformat()
+
+
 @api_bp.route("/health", methods=["GET"])
 def health():
     refresh = get_latest_refresh()
@@ -38,41 +58,38 @@ def health():
 def summary():
     month = request.args.get("month", "2026-01")
     try:
-        start_date = f"{month}-01"
-        end_date = f"{int(month[:4]) + (int(month[5:]) // 12)}-{(int(month[5:]) % 12) + 1:02d}-01"
-        if end_date.endswith("-01"):
-            year = int(month[:4])
-            mon = int(month[5:]) + 1
-            if mon > 12:
-                mon = 1
-                year += 1
-            end_date = f"{year}-{mon:02d}-01"
-    except Exception:
+        start_date, end_date = _month_range(month)
+    except (ValueError, TypeError):
         return jsonify({"error": "Invalid month format. Use YYYY-MM"}), 400
 
     metrics = get_summary_metrics(start_date, end_date)
     mape_result = get_mape(start_date, end_date, config.MAPE_EXCLUSION_THRESHOLD)
     refresh = get_latest_refresh()
 
-    total_intervals = metrics.get("total_intervals", 0) or 0
-    matched = metrics.get("matched_intervals", 0) or 0
-    coverage = (matched / total_intervals * 100) if total_intervals > 0 else 0
+    total_intervals = int(metrics.get("total_intervals") or 0)
+    with_actual = int(metrics.get("intervals_with_actual") or 0)
+    with_forecast = int(metrics.get("intervals_with_forecast") or 0)
+    matched = int(metrics.get("matched_intervals") or 0)
+    # Evaluation coverage uses actual delivery intervals as the denominator,
+    # as required by the assignment, not the union of actual/forecast rows.
+    coverage = matched / with_actual * 100 if with_actual else 0.0
 
     return jsonify({
         "period": {"start": start_date, "end": end_date},
         "metrics": {
-            "mae_mw": round(metrics.get("mae_mw") or metrics.get("mae", 0), 2) if metrics.get("mae_mw") or metrics.get("mae") else None,
-            "rmse_mw": round(metrics.get("rmse_mw") or metrics.get("rmse", 0), 2) if metrics.get("rmse_mw") or metrics.get("rmse") else None,
-            "bias_mw": round(metrics.get("bias_mw") or metrics.get("bias", 0), 2) if metrics.get("bias_mw") or metrics.get("bias") else None,
-            "mape_percent": round(mape_result.get("mape"), 2) if mape_result.get("mape") else None,
-            "mape_observations": mape_result.get("valid_observations", 0),
+            "mae_mw": _safe_round(metrics.get("mae")),
+            "rmse_mw": _safe_round(metrics.get("rmse")),
+            "bias_mw": _safe_round(metrics.get("bias")),
+            "mape_percent": _safe_round(mape_result.get("mape")),
+            "mape_observations": int(mape_result.get("valid_observations") or 0),
             "mape_exclusion_threshold_mw": config.MAPE_EXCLUSION_THRESHOLD,
         },
         "coverage": {
-            "total_intervals": int(total_intervals),
-            "intervals_with_actual": int(metrics.get("intervals_with_actual", 0) or 0),
-            "intervals_with_forecast": int(metrics.get("intervals_with_forecast", 0) or 0),
-            "matched_intervals": int(matched),
+            "total_intervals": total_intervals,
+            "intervals_with_actual": with_actual,
+            "intervals_with_forecast": with_forecast,
+            "matched_intervals": matched,
+            "coverage_denominator": with_actual,
             "coverage_percent": round(coverage, 2),
         },
         "data_quality": {
@@ -80,33 +97,8 @@ def summary():
             "period_end": metrics.get("period_end"),
             "last_refresh": refresh,
             "warnings": _generate_warnings(metrics, mape_result),
-        }
+        },
     })
-
-
-def _generate_warnings(metrics: dict, mape_result: dict) -> list:
-    warnings = []
-    total = metrics.get("total_intervals", 0) or 0
-    matched = metrics.get("matched_intervals", 0) or 0
-    with_actual = metrics.get("intervals_with_actual", 0) or 0
-    with_forecast = metrics.get("intervals_with_forecast", 0) or 0
-
-    if total == 0:
-        warnings.append("No evaluation data available for this period. Import historical data using POST /api/import")
-    elif matched == 0:
-        warnings.append("No matched intervals - cannot calculate accuracy metrics")
-    elif matched < total * 0.5:
-        warnings.append(f"Low evaluation coverage: only {matched}/{total} intervals have both actual and eligible forecast")
-
-    if with_actual == 0:
-        warnings.append("No actual generation data available")
-    if with_forecast == 0:
-        warnings.append("No eligible forecast data available")
-
-    if mape_result.get("valid_observations", 0) == 0:
-        warnings.append("MAPE unavailable: no valid observations above exclusion threshold")
-
-    return warnings
 
 
 @api_bp.route("/forecasts", methods=["GET"])
@@ -145,59 +137,58 @@ def forecasts():
 def accuracy():
     month = request.args.get("month", "2026-01")
     try:
-        start_date = f"{month}-01"
-        year = int(month[:4])
-        mon = int(month[5:]) + 1
-        if mon > 12:
-            mon = 1
-            year += 1
-        end_date = f"{year}-{mon:02d}-01"
-    except Exception:
+        start_date, end_date = _month_range(month)
+    except (ValueError, TypeError):
         return jsonify({"error": "Invalid month format. Use YYYY-MM"}), 400
 
     metrics = get_summary_metrics(start_date, end_date)
     mape_result = get_mape(start_date, end_date, config.MAPE_EXCLUSION_THRESHOLD)
-
-    matched = metrics.get("matched_intervals", 0) or 0
+    matched = int(metrics.get("matched_intervals") or 0)
+    actual_count = int(metrics.get("intervals_with_actual") or 0)
+    total_intervals = int(metrics.get("total_intervals") or 0)
+    coverage_percent = matched / actual_count * 100 if actual_count else 0.0
 
     return jsonify({
         "period": {"start": start_date, "end": end_date},
         "metrics": {
             "mae_mw": {
-                "value": round(metrics.get("mae_mw") or metrics.get("mae", 0), 2) if metrics.get("mae_mw") or metrics.get("mae") else None,
-                "description": "Mean Absolute Error - average absolute forecast error in MW",
-                "sample_count": int(matched),
+                "value": _safe_round(metrics.get("mae")),
+                "description": "Mean Absolute Error — average absolute forecast error in MW",
+                "sample_count": matched,
             },
             "rmse_mw": {
-                "value": round(metrics.get("rmse_mw") or metrics.get("rmse", 0), 2) if metrics.get("rmse_mw") or metrics.get("rmse") else None,
-                "description": "Root Mean Squared Error - penalizes larger errors more heavily",
-                "sample_count": int(matched),
+                "value": _safe_round(metrics.get("rmse")),
+                "description": "Root Mean Squared Error — penalizes larger errors more heavily",
+                "sample_count": matched,
             },
             "bias_mw": {
-                "value": round(metrics.get("bias_mw") or metrics.get("bias", 0), 2) if metrics.get("bias_mw") or metrics.get("bias") else None,
-                "description": "Mean Error (Bias) - positive means systematic overestimation, negative means underestimation",
-                "sample_count": int(matched),
+                "value": _safe_round(metrics.get("bias")),
+                "description": "Mean Error (Bias) — positive means overestimation; negative means underestimation",
+                "sample_count": matched,
             },
             "mape_percent": {
-                "value": round(mape_result.get("mape"), 2) if mape_result.get("mape") else None,
-                "description": f"Mean Absolute Percentage Error - calculated only for actuals > {config.MAPE_EXCLUSION_THRESHOLD} MW",
-                "sample_count": int(mape_result.get("valid_observations", 0)),
+                "value": _safe_round(mape_result.get("mape")),
+                "description": f"Mean Absolute Percentage Error — only actuals above {config.MAPE_EXCLUSION_THRESHOLD} MW",
+                "sample_count": int(mape_result.get("valid_observations") or 0),
                 "exclusion_threshold_mw": config.MAPE_EXCLUSION_THRESHOLD,
             },
             "coverage": {
-                "matched_intervals": int(matched),
-                "total_intervals": int(metrics.get("total_intervals", 0) or 0),
-                "description": "Proportion of delivery intervals with both actual and eligible forecast",
-            }
+                "matched_intervals": matched,
+                "total_intervals": total_intervals,
+                "intervals_with_actual": actual_count,
+                "coverage_denominator": actual_count,
+                "coverage_percent": round(coverage_percent, 2),
+                "description": "Matched eligible forecast/actual intervals divided by actual intervals available for evaluation",
+            },
         },
         "interpretation": {
             "mae": "Lower is better. Represents typical absolute forecast error magnitude.",
             "rmse": "Lower is better. More sensitive to large errors than MAE.",
-            "bias": "Close to zero is better. Positive = forecasts tend to overestimate wind. Negative = forecasts tend to underestimate wind.",
-            "mape": "Lower is better. Percentage error relative to actual generation. Excludes near-zero actuals.",
-            "coverage": "Higher is better. Indicates data completeness for evaluation.",
-            "caveat": "These metrics evaluate wind forecast accuracy only. They do not determine optimal procurement quantities, which depend on demand, other generation, interconnector flows, balancing costs, and operational constraints."
-        }
+            "bias": "Close to zero is better. Positive means forecasts tend to overestimate wind; negative means underestimation.",
+            "mape": "Lower is better. Percentage error relative to actual generation; excludes near-zero actuals.",
+            "coverage": "Higher is better. Indicates how much of the available actual series had a valid, eligible forecast.",
+            "caveat": "These metrics evaluate wind forecast accuracy only. They do not determine optimal procurement quantities, which depend on demand, other generation, interconnector flows, balancing costs, and operational constraints.",
+        },
     })
 
 
@@ -205,8 +196,14 @@ def accuracy():
 def intervals():
     start = request.args.get("start")
     end = request.args.get("end")
-    page = int(request.args.get("page", 1))
-    page_size = min(int(request.args.get("page_size", 50)), 200)
+    try:
+        page = int(request.args.get("page", 1))
+        page_size = int(request.args.get("page_size", 50))
+    except (TypeError, ValueError):
+        return jsonify({"error": "page and page_size must be integers"}), 400
+    if page < 1 or page_size < 1:
+        return jsonify({"error": "page and page_size must be positive integers"}), 400
+    page_size = min(page_size, 200)
 
     if not start or not end:
         return jsonify({"error": "start and end parameters required (ISO 8601)"}), 400
@@ -275,21 +272,41 @@ def export_intervals():
 
 @api_bp.route("/refresh", methods=["POST"])
 def refresh():
-    data = request.get_json() or {}
+    data = request.get_json(silent=True) or {}
     start_date = data.get("start_date", "2026-01-01")
     end_date = data.get("end_date", "2026-02-01")
+
+    try:
+        start = datetime.strptime(start_date, "%Y-%m-%d").date()
+        end = datetime.strptime(end_date, "%Y-%m-%d").date()
+        if end <= start:
+            return jsonify({"status": "error", "message": "end_date must be after start_date"}), 400
+    except (TypeError, ValueError):
+        return jsonify({"status": "error", "message": "Dates must use YYYY-MM-DD"}), 400
 
     log_refresh("api_refresh", "started")
     try:
         stats = ingest_and_evaluate_period(start_date, end_date)
-        log_refresh("api_refresh", "completed", 
-                   records_processed=stats["actual_records"] + stats["forecast_records"],
-                   records_inserted=stats["matched_intervals"])
+        if stats.get("errors"):
+            message = "; ".join(stats["errors"])
+            log_refresh(
+                "api_refresh", "failed",
+                records_processed=stats["actual_records"] + stats["forecast_records"],
+                records_inserted=stats["matched_intervals"],
+                error_message=message,
+            )
+            return jsonify({"status": "error", "message": message, "stats": stats}), 502
+
+        log_refresh(
+            "api_refresh", "completed",
+            records_processed=stats["actual_records"] + stats["forecast_records"],
+            records_inserted=stats["matched_intervals"],
+        )
         return jsonify({"status": "success", "stats": stats})
-    except Exception as e:
+    except Exception as exc:
         logger.exception("Refresh failed")
-        log_refresh("api_refresh", "failed", error_message=str(e))
-        return jsonify({"status": "error", "message": str(e)}), 500
+        log_refresh("api_refresh", "failed", error_message=str(exc))
+        return jsonify({"status": "error", "message": "Refresh failed; inspect backend logs."}), 500
 
 
 @api_bp.route("/import", methods=["POST"])
