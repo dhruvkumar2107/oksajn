@@ -309,43 +309,98 @@ def refresh():
         return jsonify({"status": "error", "message": "Refresh failed; inspect backend logs."}), 500
 
 
+def _load_import_records(upload):
+    """Read a bounded JSON or CSV upload and return source rows."""
+    import csv
+    import io
+    import json
+    from pathlib import Path
+
+    suffix = Path(upload.filename or "").suffix.lower()
+    if suffix not in {".json", ".csv"}:
+        raise ValueError(f"Unsupported file type for {upload.filename!r}; use .json or .csv.")
+
+    raw = upload.read()
+    if not raw:
+        raise ValueError(f"{upload.filename or 'Uploaded file'} is empty.")
+
+    if suffix == ".json":
+        try:
+            payload = json.loads(raw.decode("utf-8-sig"))
+        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise ValueError(f"{upload.filename}: invalid UTF-8 JSON file.") from exc
+        if isinstance(payload, dict):
+            payload = payload.get("data")
+        if not isinstance(payload, list):
+            raise ValueError(f"{upload.filename}: expected a JSON array or an object containing a data array.")
+        return payload
+
+    try:
+        text = raw.decode("utf-8-sig")
+    except UnicodeDecodeError as exc:
+        raise ValueError(f"{upload.filename}: CSV must be UTF-8 encoded.") from exc
+    try:
+        reader = csv.DictReader(io.StringIO(text))
+        if not reader.fieldnames:
+            raise ValueError(f"{upload.filename}: CSV header row is missing.")
+        rows = list(reader)
+    except csv.Error as exc:
+        raise ValueError(f"{upload.filename}: malformed CSV.") from exc
+    if not rows:
+        raise ValueError(f"{upload.filename}: CSV contains no records.")
+    # DictReader returns strings. Empty values become None so the normalizers
+    # can consistently reject incomplete rows.
+    return [{k: (v if v != "" else None) for k, v in row.items() if k is not None} for row in rows]
+
+
 @api_bp.route("/import", methods=["POST"])
 def import_data():
     if "actual_file" not in request.files or "forecast_file" not in request.files:
-        return jsonify({"error": "Both actual_file and forecast_file required"}), 400
+        return jsonify({"status": "error", "message": "Both actual_file and forecast_file are required."}), 400
 
     actual_file = request.files["actual_file"]
     forecast_file = request.files["forecast_file"]
-
-    if actual_file.filename == "" or forecast_file.filename == "":
-        return jsonify({"error": "No files selected"}), 400
+    if not actual_file.filename or not forecast_file.filename:
+        return jsonify({"status": "error", "message": "Choose both the actuals and forecast files."}), 400
 
     start_date = request.form.get("start_date", "2026-01-01")
     end_date = request.form.get("end_date", "2026-02-01")
-
     try:
-        import json
-        actual_json = json.load(actual_file)
-        forecast_json = json.load(forecast_file)
-
-        if not isinstance(actual_json, list):
-            actual_json = actual_json.get("data", [])
-        if not isinstance(forecast_json, list):
-            forecast_json = forecast_json.get("data", [])
-
-    except json.JSONDecodeError as e:
-        return jsonify({"error": f"Invalid JSON: {e}"}), 400
-    except Exception as e:
-        return jsonify({"error": f"File read error: {e}"}), 400
+        start = datetime.strptime(start_date, "%Y-%m-%d").date()
+        end = datetime.strptime(end_date, "%Y-%m-%d").date()
+        if end <= start:
+            return jsonify({"status": "error", "message": "end_date must be after start_date."}), 400
+        actual_records = _load_import_records(actual_file)
+        forecast_records = _load_import_records(forecast_file)
+    except ValueError as exc:
+        return jsonify({"status": "error", "message": str(exc)}), 400
 
     log_refresh("file_import", "started")
     try:
-        stats = import_from_json(actual_json, forecast_json, start_date, end_date)
-        log_refresh("file_import", "completed",
-                   records_processed=stats["actual_records"] + stats["forecast_records"],
-                   records_inserted=stats["matched_intervals"])
-        return jsonify({"status": "success", "stats": stats})
-    except Exception as e:
-        logger.exception("Import failed")
-        log_refresh("file_import", "failed", error_message=str(e))
-        return jsonify({"status": "error", "message": str(e)}), 500
+        stats = import_from_json(actual_records, forecast_records, start_date, end_date)
+        warning = "; ".join(stats.get("errors", []))
+        if stats["actual_records"] == 0 or stats["forecast_records"] == 0:
+            log_refresh(
+                "file_import", "failed",
+                records_processed=stats["actual_records"] + stats["forecast_records"],
+                records_inserted=stats["matched_intervals"],
+                error_message=warning or "No valid records were imported.",
+            )
+            return jsonify({
+                "status": "error",
+                "message": warning or "No valid source records were imported.",
+                "stats": stats,
+            }), 422
+
+        log_refresh(
+            "file_import", "completed",
+            records_processed=stats["actual_records"] + stats["forecast_records"],
+            records_inserted=stats["matched_intervals"],
+            records_failed=stats["unmatched_intervals"],
+            error_message=warning or None,
+        )
+        return jsonify({"status": "success", "stats": stats, "message": warning or "Import completed."})
+    except Exception:
+        logger.exception("Historical data import failed")
+        log_refresh("file_import", "failed", error_message="Import failed; inspect server logs.")
+        return jsonify({"status": "error", "message": "Import failed. Check that both files contain valid Elexon records and inspect backend logs."}), 500
