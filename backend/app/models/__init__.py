@@ -322,7 +322,8 @@ def get_summary_metrics(start_date: str, end_date: str) -> dict:
                 AVG(CASE WHEN has_actual = 1 AND has_eligible_forecast = 1
                          THEN error_mw END) AS bias,
                 MIN(start_time_utc) AS period_start,
-                MAX(start_time_utc) AS period_end
+                MAX(start_time_utc) AS period_end,
+                MAX(selected_forecast_publish_time_utc) AS latest_forecast_publish_time
             FROM evaluation_results
             WHERE settlement_date >= ? AND settlement_date < ?
         """
