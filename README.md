@@ -73,7 +73,7 @@ WindSight uses only the two official Elexon BMRS datasets specified in the assig
 ## 📁 Repository Structure
 
 ```
-windsight/
+oksajn/
 ├── backend/
 │   ├── app/
 │   │   ├── __init__.py          # Flask app factory
@@ -330,23 +330,29 @@ Content-Type: application/json
 ```
 POST /api/import
 Content-Type: multipart/form-data
-actual_file: <JSON file>
-forecast_file: <JSON file>
+actual_file: <JSON or CSV file>
+forecast_file: <JSON or CSV file>
 start_date: 2026-01-01
 end_date: 2026-02-01
 ```
 
 ## 🧪 Testing
 
-```bash
-# Backend tests
-cd backend
-python -m pytest app/tests/ -v
+Run the following commands from the repository root:
 
-# Frontend build verification
-cd frontend
-npm run build
+```bash
+# Backend unit and API tests
+(cd backend && python -m pytest app/tests/ -v)
+
+# Frontend production build
+(cd frontend && npm ci && npm run build)
+
+# Validate and build Docker Compose services
+docker compose config
+docker compose build
 ```
+
+GitHub Actions runs the backend test suite, builds the frontend, builds both Docker images, starts the integrated application, and smoke-tests the backend health, Vercel/Nginx-style `/api` proxy route, and January 2026 summary endpoint. See the [latest CI run](https://github.com/dhruvkumar2107/oksajn/actions).
 
 ### Test Coverage
 - Timestamp parsing & timezone normalization
