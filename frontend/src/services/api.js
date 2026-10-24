@@ -20,24 +20,38 @@ async function readResponse(response) {
 }
 
 async function request(endpoint, options = {}) {
-  const url = `${API_BASE}${endpoint}`;
+  const url = API_BASE + endpoint;
   const headers = new Headers(options.headers || {});
   const isFormData = typeof FormData !== 'undefined' && options.body instanceof FormData;
   if (options.body && !isFormData && !headers.has('Content-Type')) {
     headers.set('Content-Type', 'application/json');
   }
 
+  // Prevent a stalled API request from leaving the page in a permanent
+  // loading state. Refresh gets a longer budget because it fetches historical
+  // publication windows from Elexon.
+  const timeoutMs = options.timeoutMs ?? 25000;
+  const fetchOptions = { ...options };
+  delete fetchOptions.timeoutMs;
+  const controller = new AbortController();
+  const timeoutId = window.setTimeout(() => controller.abort(), timeoutMs);
+
   try {
-    const response = await fetch(url, { ...options, headers });
+    const response = await fetch(url, { ...fetchOptions, headers, signal: controller.signal });
     const data = await readResponse(response);
     if (!response.ok) {
-      throw new Error(data?.message || data?.error || `HTTP ${response.status} from ${endpoint}`);
+      throw new Error(data?.message || data?.error || 'HTTP ' + response.status + ' from ' + endpoint);
     }
-    if (data === null) throw new Error(`The server returned an empty response for ${endpoint}`);
+    if (data === null) throw new Error('The server returned an empty response for ' + endpoint);
     return data;
   } catch (error) {
-    console.error(`API request failed: ${endpoint}`, error);
-    throw error;
+    const message = error?.name === 'AbortError'
+      ? 'Request timed out after ' + Math.ceil(timeoutMs / 1000) + ' seconds for ' + endpoint + '.'
+      : error.message;
+    console.error('API request failed: ' + endpoint, error);
+    throw new Error(message || ('Request failed for ' + endpoint));
+  } finally {
+    window.clearTimeout(timeoutId);
   }
 }
 
@@ -65,6 +79,7 @@ export const api = {
   refresh: (startDate = '2026-01-01', endDate = '2026-02-01') =>
     request('/refresh', {
       method: 'POST',
+      timeoutMs: 300000,
       body: JSON.stringify({ start_date: startDate, end_date: endDate }),
     }),
 
@@ -74,7 +89,7 @@ export const api = {
     formData.append('forecast_file', forecastFile);
     formData.append('start_date', startDate);
     formData.append('end_date', endDate);
-    return request('/import', { method: 'POST', body: formData });
+    return request('/import', { method: 'POST', timeoutMs: 120000, body: formData });
   },
 };
 
