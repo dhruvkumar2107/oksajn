@@ -1,7 +1,12 @@
 import os
+from dotenv import load_dotenv
 from dataclasses import dataclass
 from datetime import time
 from zoneinfo import ZoneInfo
+
+# Load a local .env for documented non-Docker development. In deployed
+# environments, platform-provided environment variables take precedence.
+load_dotenv(override=False)
 
 
 def _int_env(name: str, default: int) -> int:
