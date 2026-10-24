@@ -100,7 +100,7 @@ function App() {
 
   const handleImport = async () => {
     if (!actualImportFile || !forecastImportFile) {
-      setErrors(prev => ({ ...prev, import: 'Select both the FUELHH WIND actuals JSON and the WINDFOR forecasts JSON files first.' }));
+      setErrors(prev => ({ ...prev, import: 'Select both the FUELHH WIND actuals and WINDFOR forecast files first.' }));
       return;
     }
 
@@ -174,22 +174,22 @@ function App() {
           <div className="header-actions">
             <div className="file-pickers">
               <label htmlFor="actual-file-input" className="btn btn-secondary">
-                {actualImportFile ? 'Actuals selected ✓' : 'Choose actuals JSON'}
+                {actualImportFile ? 'Actuals selected ✓' : 'Choose actuals file'}
               </label>
               <input
                 type="file"
                 id="actual-file-input"
-                accept=".json,application/json"
+                accept=".json,.csv,application/json,text/csv"
                 onChange={event => setActualImportFile(event.target.files?.[0] || null)}
                 className="visually-hidden-file"
               />
               <label htmlFor="forecast-file-input" className="btn btn-secondary">
-                {forecastImportFile ? 'Forecasts selected ✓' : 'Choose forecasts JSON'}
+                {forecastImportFile ? 'Forecasts selected ✓' : 'Choose forecasts file'}
               </label>
               <input
                 type="file"
                 id="forecast-file-input"
-                accept=".json,application/json"
+                accept=".json,.csv,application/json,text/csv"
                 onChange={event => setForecastImportFile(event.target.files?.[0] || null)}
                 className="visually-hidden-file"
               />
