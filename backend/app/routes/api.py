@@ -137,6 +137,7 @@ def summary():
         "data_quality": {
             "period_start": metrics.get("period_start"),
             "period_end": metrics.get("period_end"),
+            "latest_eligible_forecast_publish_time": metrics.get("latest_forecast_publish_time"),
             "last_refresh": refresh,
             "warnings": _generate_warnings(metrics, mape_result),
         },
