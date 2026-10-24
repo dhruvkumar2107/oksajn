@@ -223,6 +223,29 @@ class TestForecastEvaluation:
         assert result.iloc[0]["is_overestimation"] == 0
         assert result.iloc[0]["is_underestimation"] == 1
 
+    def test_matches_by_start_time_even_if_settlement_labels_differ(self):
+        delivery = pd.Timestamp("2026-01-15T00:00:00Z", tz="UTC")
+        actuals = pd.DataFrame({
+            "settlement_date": ["2026-01-15"],
+            "settlement_period": [1],
+            "start_time_utc": [delivery],
+            "actual_generation_mw": [1000],
+            "has_actual": [1],
+        })
+        forecasts = pd.DataFrame({
+            "settlement_date": ["2026-01-16"],
+            "settlement_period": [3],
+            "start_time_utc": [delivery],
+            "selected_forecast_generation_mw": [1100],
+            "selected_forecast_publish_time_utc": [pd.Timestamp("2026-01-14T10:30:00Z", tz="UTC")],
+            "has_forecast": [1],
+        })
+        result = evaluate_forecasts(actuals, forecasts)
+        assert len(result) == 1
+        assert result.iloc[0]["has_actual"] == 1
+        assert result.iloc[0]["has_eligible_forecast"] == 1
+        assert result.iloc[0]["error_mw"] == 100
+
     def test_missing_actual_flagged(self):
         actuals = pd.DataFrame()
         forecasts = pd.DataFrame({
