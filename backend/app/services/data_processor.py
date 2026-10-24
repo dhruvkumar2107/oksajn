@@ -20,11 +20,13 @@ UK_TZ = ZoneInfo("Europe/London")
 
 
 def parse_utc_timestamp(ts: str) -> pd.Timestamp:
-    if pd.isna(ts) or ts is None:
+    """Parse an ISO timestamp as UTC without double-localizing aware values."""
+    if ts is None or pd.isna(ts):
         return pd.NaT
     try:
-        return pd.Timestamp(ts, tz="UTC")
-    except Exception:
+        parsed = pd.to_datetime(ts, utc=True, errors="coerce")
+        return pd.Timestamp(parsed) if not pd.isna(parsed) else pd.NaT
+    except (TypeError, ValueError, OverflowError):
         return pd.NaT
 
 
@@ -52,54 +54,120 @@ def get_decision_cutoff_for_delivery(delivery_start_utc: pd.Timestamp) -> pd.Tim
     return cutoff_uk.tz_convert("UTC")
 
 
+def _add_settlement_keys(df: pd.DataFrame) -> pd.DataFrame:
+    """Use official keys when supplied; otherwise derive them from startTime."""
+    local_times = df["start_time_utc"].dt.tz_convert(UK_TZ)
+    if "settlementDate" in df.columns:
+        dates = df["settlementDate"].astype("string")
+        df["settlement_date"] = dates.where(dates.notna() & (dates != ""), local_times.dt.strftime("%Y-%m-%d"))
+    else:
+        df["settlement_date"] = local_times.dt.strftime("%Y-%m-%d")
+
+    if "settlementPeriod" in df.columns:
+        periods = pd.to_numeric(df["settlementPeriod"], errors="coerce")
+        derived = (local_times.dt.hour * 2 + (local_times.dt.minute // 30) + 1).astype("Int64")
+        df["settlement_period"] = periods.where(periods.notna(), derived).astype("Int64")
+    else:
+        df["settlement_period"] = (
+            local_times.dt.hour * 2 + (local_times.dt.minute // 30) + 1
+        ).astype("Int64")
+    return df
+
+
 def normalize_actual_generation(raw_records: list) -> pd.DataFrame:
+    """Normalize FUELHH actuals and enforce the assignment's WIND-only scope."""
     if not raw_records:
         return pd.DataFrame()
 
-    df = pd.DataFrame(raw_records)
-    required_cols = ["settlementDate", "settlementPeriod", "startTime", "publishTime", "generation"]
-    missing = [c for c in required_cols if c not in df.columns]
+    df = pd.DataFrame(raw_records).copy()
+    required = ["startTime", "generation", "fuelType"]
+    missing = [column for column in required if column not in df.columns]
     if missing:
-        logger.warning(f"Missing columns in actual generation data: {missing}")
+        logger.warning("Actual data missing required columns: %s", missing)
         return pd.DataFrame()
 
-    df = df.copy()
+    # Do this before de-duplication: otherwise a non-WIND row appearing first
+    # can win a duplicate key and contaminate the national wind series.
+    df = df[df["fuelType"].astype(str).str.upper() == "WIND"].copy()
+    if df.empty:
+        return pd.DataFrame()
+
     df["start_time_utc"] = df["startTime"].apply(parse_utc_timestamp)
-    df["publish_time_utc"] = df["publishTime"].apply(parse_utc_timestamp)
     df["generation_mw"] = pd.to_numeric(df["generation"], errors="coerce")
-    df["settlement_date"] = df["settlementDate"].astype(str)
-    df["settlement_period"] = pd.to_numeric(df["settlementPeriod"], errors="coerce").astype("Int64")
+    df = _add_settlement_keys(df)
 
-    df = df.dropna(subset=["start_time_utc", "publish_time_utc", "generation_mw", "settlement_period"])
-    df = df[["settlement_date", "settlement_period", "start_time_utc", "publish_time_utc", "generation_mw"]]
-    df = df.drop_duplicates(subset=["settlement_date", "settlement_period", "publish_time_utc"])
+    # publishTime is not an input to the actual/forecast comparison. If a
+    # source export omits it, use startTime only as a storage-key fallback.
+    if "publishTime" in df.columns:
+        df["publish_time_utc"] = df["publishTime"].apply(parse_utc_timestamp)
+        df["publish_time_utc"] = df["publish_time_utc"].fillna(df["start_time_utc"])
+    else:
+        df["publish_time_utc"] = df["start_time_utc"]
 
-    return df
+    df = df.dropna(subset=[
+        "start_time_utc", "generation_mw", "settlement_date", "settlement_period"
+    ])
+    df = df[[
+        "settlement_date", "settlement_period", "start_time_utc",
+        "publish_time_utc", "generation_mw"
+    ]]
+    df = df.drop_duplicates(
+        subset=["settlement_date", "settlement_period", "start_time_utc", "publish_time_utc"],
+        keep="last",
+    )
+    return df.reset_index(drop=True)
 
 
 def normalize_forecast_generation(raw_records: list) -> pd.DataFrame:
+    """Normalize WINDFOR while preserving the forecast publication vintage."""
     if not raw_records:
         return pd.DataFrame()
 
-    df = pd.DataFrame(raw_records)
-    required_cols = ["settlementDate", "settlementPeriod", "startTime", "publishTime", "generation"]
-    missing = [c for c in required_cols if c not in df.columns]
+    df = pd.DataFrame(raw_records).copy()
+    required = ["startTime", "publishTime", "generation"]
+    missing = [column for column in required if column not in df.columns]
     if missing:
-        logger.warning(f"Missing columns in forecast generation data: {missing}")
+        logger.warning("Forecast data missing required columns: %s", missing)
         return pd.DataFrame()
 
-    df = df.copy()
     df["start_time_utc"] = df["startTime"].apply(parse_utc_timestamp)
     df["publish_time_utc"] = df["publishTime"].apply(parse_utc_timestamp)
     df["generation_mw"] = pd.to_numeric(df["generation"], errors="coerce")
-    df["settlement_date"] = df["settlementDate"].astype(str)
-    df["settlement_period"] = pd.to_numeric(df["settlementPeriod"], errors="coerce").astype("Int64")
+    df = _add_settlement_keys(df)
+    df = df.dropna(subset=[
+        "start_time_utc", "publish_time_utc", "generation_mw",
+        "settlement_date", "settlement_period"
+    ])
+    df = df[[
+        "settlement_date", "settlement_period", "start_time_utc",
+        "publish_time_utc", "generation_mw"
+    ]]
+    df = df.drop_duplicates(
+        subset=["settlement_date", "settlement_period", "start_time_utc", "publish_time_utc"],
+        keep="last",
+    )
+    return df.reset_index(drop=True)
 
-    df = df.dropna(subset=["start_time_utc", "publish_time_utc", "generation_mw", "settlement_period"])
-    df = df[["settlement_date", "settlement_period", "start_time_utc", "publish_time_utc", "generation_mw"]]
-    df = df.drop_duplicates(subset=["settlement_date", "settlement_period", "publish_time_utc"])
 
-    return df
+def filter_delivery_period(df: pd.DataFrame, start_date: str, end_date: str) -> pd.DataFrame:
+    """Keep delivery startTimes in [start_date, end_date), interpreted in UK time."""
+    if df.empty:
+        return df.copy()
+    start_utc = pd.Timestamp(start_date).tz_localize(UK_TZ).tz_convert("UTC")
+    end_utc = pd.Timestamp(end_date).tz_localize(UK_TZ).tz_convert("UTC")
+    return df[
+        (df["start_time_utc"] >= start_utc) &
+        (df["start_time_utc"] < end_utc)
+    ].copy().reset_index(drop=True)
+
+
+def _uk_publication_window(start_date: str, end_date: str, pad_start_days: int = 0,
+                           pad_end_days: int = 0) -> tuple[str, str]:
+    start = (pd.Timestamp(start_date).tz_localize(UK_TZ) -
+             pd.Timedelta(days=pad_start_days)).tz_convert("UTC")
+    end = (pd.Timestamp(end_date).tz_localize(UK_TZ) +
+           pd.Timedelta(days=pad_end_days)).tz_convert("UTC")
+    return start.isoformat().replace("+00:00", "Z"), end.isoformat().replace("+00:00", "Z")
 
 
 def select_eligible_forecasts(forecasts: pd.DataFrame) -> pd.DataFrame:
@@ -219,86 +287,126 @@ def ingest_and_evaluate_period(start_date: str, end_date: str) -> dict:
         "eligible_forecasts": 0,
         "matched_intervals": 0,
         "unmatched_intervals": 0,
-        "errors": []
+        "errors": [],
     }
+
+    # Dataset stream filters are by publishTime, not the delivery startTime.
+    # Retrieve a padded publication window, then explicitly filter by startTime.
+    actual_from, actual_to = _uk_publication_window(
+        start_date, end_date, pad_start_days=1, pad_end_days=1
+    )
+    forecast_from, forecast_to = _uk_publication_window(
+        start_date, end_date, pad_start_days=1, pad_end_days=0
+    )
 
     try:
         with ElexonClient() as client:
-            logger.info(f"Fetching actual generation for {start_date} to {end_date}")
-            actual_raw = client.get_fuelhh_wind_only(start_time=f"{start_date}T00:00:00Z", end_time=f"{end_date}T00:00:00Z")
-            logger.info(f"Fetched {len(actual_raw)} actual records")
+            logger.info("Fetching FUELHH published %s to %s", actual_from, actual_to)
+            actual_raw = client.get_fuelhh_wind_only(
+                start_time=actual_from, end_time=actual_to
+            )
+            logger.info("Fetched %s FUELHH WIND source rows", len(actual_raw))
 
-            logger.info(f"Fetching forecast generation for {start_date} to {end_date}")
-            forecast_raw = client.get_windfor(start_time=f"{start_date}T00:00:00Z", end_time=f"{end_date}T00:00:00Z")
-            logger.info(f"Fetched {len(forecast_raw)} forecast records")
-
-    except Exception as e:
-        logger.error(f"API fetch failed: {e}")
-        stats["errors"].append(str(e))
+            logger.info("Fetching WINDFOR published %s to %s", forecast_from, forecast_to)
+            forecast_raw = client.get_windfor(
+                start_time=forecast_from, end_time=forecast_to
+            )
+            logger.info("Fetched %s WINDFOR source rows", len(forecast_raw))
+    except Exception as exc:
+        logger.exception("Elexon historical data fetch failed")
+        stats["errors"].append(str(exc))
         return stats
 
-    actuals_df = normalize_actual_generation(actual_raw)
-    forecasts_df = normalize_forecast_generation(forecast_raw)
+    actuals_df = filter_delivery_period(
+        normalize_actual_generation(actual_raw), start_date, end_date
+    )
+    forecasts_df = filter_delivery_period(
+        normalize_forecast_generation(forecast_raw), start_date, end_date
+    )
 
-    stats["actual_records"] = len(actuals_df)
-    stats["forecast_records"] = len(forecasts_df)
+    stats["actual_records"] = int(len(actuals_df))
+    stats["forecast_records"] = int(len(forecasts_df))
 
     if not actuals_df.empty:
-        inserted = insert_actual_generation(actuals_df)
-        logger.info(f"Inserted {inserted} actual records")
-
+        insert_actual_generation(actuals_df)
     if not forecasts_df.empty:
-        inserted = insert_forecast_generation(forecasts_df)
-        logger.info(f"Inserted {inserted} forecast records")
+        insert_forecast_generation(forecasts_df)
 
     selected_forecasts = select_eligible_forecasts(forecasts_df)
-    stats["eligible_forecasts"] = len(selected_forecasts)
-
-    evaluation_df = evaluate_forecasts(actuals_df, selected_forecasts, config.MAPE_EXCLUSION_THRESHOLD)
-    
-    matched = evaluation_df[(evaluation_df["has_actual"] == 1) & (evaluation_df["has_eligible_forecast"] == 1)]
-    stats["matched_intervals"] = len(matched)
-    stats["unmatched_intervals"] = len(evaluation_df) - len(matched)
+    stats["eligible_forecasts"] = int(len(selected_forecasts))
+    evaluation_df = evaluate_forecasts(
+        actuals_df, selected_forecasts, config.MAPE_EXCLUSION_THRESHOLD
+    )
 
     if not evaluation_df.empty:
-        inserted = insert_evaluation_results(evaluation_df)
-        logger.info(f"Inserted/updated {inserted} evaluation records")
+        matched = evaluation_df[
+            (evaluation_df["has_actual"] == 1) &
+            (evaluation_df["has_eligible_forecast"] == 1)
+        ]
+        stats["matched_intervals"] = int(len(matched))
+        stats["unmatched_intervals"] = int(len(evaluation_df) - len(matched))
+        insert_evaluation_results(evaluation_df)
 
+    if stats["actual_records"] == 0:
+        stats["errors"].append(
+            "No genuine FUELHH WIND records were returned for January delivery intervals. "
+            "Verify historical endpoint access or import an official export."
+        )
+    if stats["forecast_records"] == 0:
+        stats["errors"].append(
+            "No genuine WINDFOR records with publication timestamps were returned for the "
+            "requested delivery period. Do not report accuracy metrics without eligible vintages."
+        )
     return stats
 
 
 def import_from_json(actual_json: list, forecast_json: list, start_date: str, end_date: str) -> dict:
+    """Import genuine source records after strict schema and delivery-period checks."""
     stats = {
         "actual_records": 0,
         "forecast_records": 0,
         "eligible_forecasts": 0,
         "matched_intervals": 0,
         "unmatched_intervals": 0,
-        "errors": []
+        "errors": [],
     }
+    if not isinstance(actual_json, list) or not isinstance(forecast_json, list):
+        raise ValueError("Both imported datasets must contain JSON arrays or an object with a data array.")
+    if not actual_json or not forecast_json:
+        raise ValueError("Both the actuals and forecast files must contain records.")
 
-    actuals_df = normalize_actual_generation(actual_json)
-    forecasts_df = normalize_forecast_generation(forecast_json)
+    actuals_df = filter_delivery_period(
+        normalize_actual_generation(actual_json), start_date, end_date
+    )
+    forecasts_df = filter_delivery_period(
+        normalize_forecast_generation(forecast_json), start_date, end_date
+    )
+    if actuals_df.empty:
+        raise ValueError("No valid WIND actual records in the selected delivery period.")
+    if forecasts_df.empty:
+        raise ValueError("No valid WINDFOR records with publishTime in the selected delivery period.")
 
-    stats["actual_records"] = len(actuals_df)
-    stats["forecast_records"] = len(forecasts_df)
+    stats["actual_records"] = int(len(actuals_df))
+    stats["forecast_records"] = int(len(forecasts_df))
 
-    if not actuals_df.empty:
-        insert_actual_generation(actuals_df)
-
-    if not forecasts_df.empty:
-        insert_forecast_generation(forecasts_df)
+    insert_actual_generation(actuals_df)
+    insert_forecast_generation(forecasts_df)
 
     selected_forecasts = select_eligible_forecasts(forecasts_df)
-    stats["eligible_forecasts"] = len(selected_forecasts)
-
-    evaluation_df = evaluate_forecasts(actuals_df, selected_forecasts, config.MAPE_EXCLUSION_THRESHOLD)
-    
-    matched = evaluation_df[(evaluation_df["has_actual"] == 1) & (evaluation_df["has_eligible_forecast"] == 1)]
-    stats["matched_intervals"] = len(matched)
-    stats["unmatched_intervals"] = len(evaluation_df) - len(matched)
-
+    stats["eligible_forecasts"] = int(len(selected_forecasts))
+    evaluation_df = evaluate_forecasts(
+        actuals_df, selected_forecasts, config.MAPE_EXCLUSION_THRESHOLD
+    )
     if not evaluation_df.empty:
+        matched = evaluation_df[
+            (evaluation_df["has_actual"] == 1) &
+            (evaluation_df["has_eligible_forecast"] == 1)
+        ]
+        stats["matched_intervals"] = int(len(matched))
+        stats["unmatched_intervals"] = int(len(evaluation_df) - len(matched))
         insert_evaluation_results(evaluation_df)
-
+    if stats["matched_intervals"] == 0:
+        stats["errors"].append(
+            "Import succeeded but no interval had both actuals and an eligible pre-cutoff forecast."
+        )
     return stats
