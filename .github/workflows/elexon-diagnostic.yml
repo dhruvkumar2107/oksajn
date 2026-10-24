@@ -1,0 +1,55 @@
+name: Elexon Source Diagnostic
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - ".github/workflows/elexon-diagnostic.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  inspect-source:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Check Elexon historical publication windows
+        run: |
+          python - <<'PY'
+          import json
+          import requests
+
+          base = "https://data.elexon.co.uk/bmrs/api/v1"
+          windows = {
+              "FUELHH": ("2026-01-10T00:00:00Z", "2026-01-11T00:00:00Z"),
+              "WINDFOR": ("2026-01-10T00:00:00Z", "2026-01-11T00:00:00Z"),
+          }
+          for dataset, (start, end) in windows.items():
+              url = f"{base}/datasets/{dataset}/stream"
+              try:
+                  response = requests.get(
+                      url,
+                      params={"publishDateTimeFrom": start, "publishDateTimeTo": end},
+                      timeout=25,
+                  )
+                  print(f"DATASET={dataset} STATUS={response.status_code} URL={response.url}")
+                  response.raise_for_status()
+                  payload = response.json()
+                  rows = payload if isinstance(payload, list) else payload.get("data", [])
+                  if not isinstance(rows, list):
+                      rows = []
+                  print(f"DATASET={dataset} COUNT={len(rows)}")
+                  for row in rows[:2]:
+                      if dataset == "FUELHH":
+                          print("SAMPLE=" + json.dumps({k: row.get(k) for k in ("dataset", "fuelType", "startTime", "publishTime", "generation", "settlementDate", "settlementPeriod")}))
+                      else:
+                          print("SAMPLE=" + json.dumps({k: row.get(k) for k in ("dataset", "startTime", "publishTime", "generation", "settlementDate", "settlementPeriod")}))
+              except Exception as exc:
+                  print(f"DATASET={dataset} ERROR={type(exc).__name__}: {exc}")
+                  raise
+          PY
