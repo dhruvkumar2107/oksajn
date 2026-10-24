@@ -12,7 +12,7 @@ permissions:
 jobs:
   inspect-source:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 8
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -76,6 +76,7 @@ jobs:
         run: |
           python - <<'PY'
           import json
+          import time
           import urllib.error
           import urllib.request
 
@@ -98,12 +99,35 @@ jobs:
           try:
               with urllib.request.urlopen(request, timeout=300) as response:
                   result = json.loads(response.read().decode("utf-8"))
-                  print("LIVE_REFRESH_STATUS=" + str(response.status))
-                  print("LIVE_REFRESH_RESULT=" + json.dumps(result))
+                  print("LIVE_REFRESH_HTTP_STATUS=" + str(response.status))
+                  print("LIVE_REFRESH_START_RESULT=" + json.dumps(result))
           except urllib.error.HTTPError as exc:
               detail = exc.read().decode("utf-8", errors="replace")
               print("LIVE_REFRESH_HTTP_ERROR=" + str(exc.code) + " " + detail)
               raise
+
+          # New backend returns quickly with a job ID; continue to support the
+          # previous synchronous response while Render deploys the new version.
+          if result.get("status") == "started":
+              refresh_id = result.get("refresh_id")
+              assert refresh_id, "Refresh started without a refresh_id"
+              deadline = time.monotonic() + 360
+              while time.monotonic() < deadline:
+                  job = get_json(base + f"/refresh/status/{refresh_id}")
+                  print("LIVE_REFRESH_JOB_STATUS=" + json.dumps(job))
+                  if job.get("status") in ("completed", "failed"):
+                      break
+                  time.sleep(4)
+              assert job.get("status") == "completed", (
+                  "Live refresh did not complete successfully: " + json.dumps(job)
+              )
+              print("LIVE_REFRESH_RESULT=" + json.dumps(job))
+          else:
+              assert result.get("status") == "success", (
+                  "Refresh returned an unexpected response: " + json.dumps(result)
+              )
+              print("LIVE_REFRESH_RESULT=" + json.dumps(result))
+
           summary = get_json(base + "/summary?month=2026-01")
           print("LIVE_JANUARY_SUMMARY=" + json.dumps(summary))
           coverage = summary.get("coverage", {})
