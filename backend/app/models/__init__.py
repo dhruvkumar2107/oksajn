@@ -91,8 +91,85 @@ def db_transaction():
 
 
 def init_db():
+    """Create tables and migrate older persistent SQLite databases in place.
+
+    CREATE TABLE IF NOT EXISTS does not add columns to an existing table. Since
+    Render may retain a SQLite file across deployments, keep the expected
+    evaluation columns forward-compatible without deleting any user data.
+    """
     with db_transaction() as conn:
         conn.executescript(SCHEMA_SQL)
+
+        # SQLite-compatible additive migrations only. Existing rows and tables
+        # are preserved. Columns added here are nullable because old rows cannot
+        # always be reconstructed from the old schema.
+        migrations = {
+            "actual_generation": {
+                "settlement_date": "TEXT",
+                "settlement_period": "INTEGER",
+                "start_time_utc": "TEXT",
+                "publish_time_utc": "TEXT",
+                "generation_mw": "REAL",
+                "created_at": "TEXT",
+            },
+            "forecast_generation": {
+                "settlement_date": "TEXT",
+                "settlement_period": "INTEGER",
+                "start_time_utc": "TEXT",
+                "publish_time_utc": "TEXT",
+                "generation_mw": "REAL",
+                "created_at": "TEXT",
+            },
+            "evaluation_results": {
+                "settlement_date": "TEXT",
+                "settlement_period": "INTEGER",
+                "start_time_utc": "TEXT",
+                "actual_generation_mw": "REAL",
+                "selected_forecast_generation_mw": "REAL",
+                "selected_forecast_publish_time_utc": "TEXT",
+                "error_mw": "REAL",
+                "absolute_error_mw": "REAL",
+                "is_overestimation": "INTEGER DEFAULT 0",
+                "is_underestimation": "INTEGER DEFAULT 0",
+                "has_eligible_forecast": "INTEGER DEFAULT 0",
+                "has_actual": "INTEGER DEFAULT 0",
+                "evaluation_status": "TEXT",
+                "created_at": "TEXT",
+            },
+            "data_refresh_log": {
+                "refresh_type": "TEXT",
+                "status": "TEXT",
+                "records_processed": "INTEGER DEFAULT 0",
+                "records_inserted": "INTEGER DEFAULT 0",
+                "records_failed": "INTEGER DEFAULT 0",
+                "error_message": "TEXT",
+                "started_at": "TEXT",
+                "completed_at": "TEXT",
+            },
+        }
+
+        for table_name, expected_columns in migrations.items():
+            existing_columns = {
+                row["name"] for row in conn.execute(f"PRAGMA table_info({table_name})").fetchall()
+            }
+            for column_name, column_type in expected_columns.items():
+                if column_name not in existing_columns:
+                    conn.execute(
+                        f'ALTER TABLE "{table_name}" ADD COLUMN "{column_name}" {column_type}'
+                    )
+
+        # Additive column migrations can introduce columns referenced by new
+        # queries, so create/recreate indexes after the migration pass.
+        conn.executescript("""
+            CREATE INDEX IF NOT EXISTS idx_actual_date_period
+                ON actual_generation(settlement_date, settlement_period);
+            CREATE INDEX IF NOT EXISTS idx_forecast_date_period
+                ON forecast_generation(settlement_date, settlement_period);
+            CREATE INDEX IF NOT EXISTS idx_evaluation_date_period
+                ON evaluation_results(settlement_date, settlement_period);
+            CREATE INDEX IF NOT EXISTS idx_forecast_publish_time
+                ON forecast_generation(publish_time_utc);
+        """)
 
 
 def insert_actual_generation(df: pd.DataFrame) -> int:
