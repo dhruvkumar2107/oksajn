@@ -10,7 +10,7 @@ async function readResponse(response) {
   try {
     return JSON.parse(text);
   } catch {
-    const looksLikeHtml = /<\\s*!doctype html|<\\s*html[\\s>]|<\\s*title>/i.test(text);
+    const looksLikeHtml = /<!doctype html|<html[\s>]|<title>/i.test(text);
     return {
       message: looksLikeHtml
         ? 'The backend returned an HTML error page instead of JSON. Check the backend deployment and server logs.'
@@ -76,12 +76,35 @@ export const api = {
     return response.blob();
   },
 
-  refresh: (startDate = '2026-01-01', endDate = '2026-02-01') =>
-    request('/refresh', {
+  refresh: async (startDate = '2026-01-01', endDate = '2026-02-01') => {
+    // The initial request returns a job ID immediately. Poll the cheap status
+    // endpoint while the backend fetches the full historic Elexon publication window.
+    const started = await request('/refresh', {
       method: 'POST',
-      timeoutMs: 300000,
+      timeoutMs: 20000,
       body: JSON.stringify({ start_date: startDate, end_date: endDate }),
-    }),
+    });
+
+    // Backwards compatibility if an older backend still returns a completed result.
+    if (started.status === 'success') return started;
+    if (started.status !== 'started' || !started.refresh_id) {
+      throw new Error(started.message || 'The backend did not start the refresh job.');
+    }
+
+    const deadline = Date.now() + 8 * 60 * 1000;
+    while (Date.now() < deadline) {
+      await new Promise(resolve => window.setTimeout(resolve, 2000));
+      const job = await request(`/refresh/status/${encodeURIComponent(started.refresh_id)}`);
+      if (job.status === 'completed') {
+        return { status: 'success', stats: job.stats || {} };
+      }
+      if (job.status === 'failed' || job.status === 'error') {
+        throw new Error(job.message || 'The Elexon refresh failed. Check the backend refresh status and logs.');
+      }
+    }
+
+    throw new Error('The refresh is still running. Wait a moment, then refresh the dashboard to see whether it completed.');
+  },
 
   import: (actualFile, forecastFile, startDate = '2026-01-01', endDate = '2026-02-01') => {
     const formData = new FormData();

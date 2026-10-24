@@ -59,6 +59,7 @@ CREATE TABLE IF NOT EXISTS data_refresh_log (
     error_message TEXT,
     started_at TEXT NOT NULL,
     completed_at TEXT,
+    result_json TEXT,
     UNIQUE(refresh_type, started_at)
 );
 
@@ -141,6 +142,7 @@ def init_db():
                 "error_message": "TEXT",
                 "started_at": "TEXT",
                 "completed_at": "TEXT",
+                "result_json": "TEXT",
             },
         }
 
@@ -364,7 +366,82 @@ def log_refresh(refresh_type: str, status: str, records_processed: int = 0,
 
 def get_latest_refresh() -> Optional[dict]:
     with get_db_connection() as conn:
-        sql = "SELECT * FROM data_refresh_log ORDER BY started_at DESC LIMIT 1"
+        sql = """
+            SELECT id, refresh_type, status, records_processed, records_inserted,
+                   records_failed, error_message, started_at, completed_at
+            FROM data_refresh_log ORDER BY started_at DESC, id DESC LIMIT 1
+        """
         cursor = conn.execute(sql)
         row = cursor.fetchone()
         return dict(row) if row else None
+
+def create_refresh_job(refresh_type: str = "api_refresh") -> int:
+    """Create a refresh row that can be polled while work runs in a background thread."""
+    now = pd.Timestamp.utcnow().isoformat()
+    with db_transaction() as conn:
+        cursor = conn.execute(
+            """
+            INSERT INTO data_refresh_log
+              (refresh_type, status, records_processed, records_inserted,
+               records_failed, error_message, started_at, completed_at, result_json)
+            VALUES (?, 'started', 0, 0, 0, NULL, ?, NULL, NULL)
+            """,
+            (refresh_type, now),
+        )
+        return int(cursor.lastrowid)
+
+
+def update_refresh_job(
+    refresh_id: int,
+    status: str,
+    records_processed: int = 0,
+    records_inserted: int = 0,
+    records_failed: int = 0,
+    error_message: Optional[str] = None,
+    result: Optional[dict] = None,
+) -> None:
+    """Update an existing refresh job and retain its result for clients polling status."""
+    import json
+
+    completed_at = pd.Timestamp.utcnow().isoformat()
+    result_json = json.dumps(result, default=str) if result is not None else None
+    with db_transaction() as conn:
+        cursor = conn.execute(
+            """
+            UPDATE data_refresh_log
+            SET status = ?, records_processed = ?, records_inserted = ?,
+                records_failed = ?, error_message = ?, completed_at = ?, result_json = ?
+            WHERE id = ?
+            """,
+            (
+                status, int(records_processed), int(records_inserted), int(records_failed),
+                error_message, completed_at, result_json, int(refresh_id),
+            ),
+        )
+        if cursor.rowcount != 1:
+            raise ValueError(f"Refresh job {refresh_id} does not exist")
+
+
+def get_refresh_job(refresh_id: int) -> Optional[dict]:
+    """Fetch one refresh job, decoding its stored result stats."""
+    import json
+
+    with get_db_connection() as conn:
+        row = conn.execute(
+            """
+            SELECT id, refresh_type, status, records_processed, records_inserted,
+                   records_failed, error_message, started_at, completed_at, result_json
+            FROM data_refresh_log WHERE id = ?
+            """,
+            (int(refresh_id),),
+        ).fetchone()
+    if not row:
+        return None
+
+    result = dict(row)
+    raw_result = result.pop("result_json", None)
+    try:
+        result["stats"] = json.loads(raw_result) if raw_result else None
+    except (TypeError, ValueError):
+        result["stats"] = None
+    return result

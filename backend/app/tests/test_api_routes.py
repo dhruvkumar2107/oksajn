@@ -1,6 +1,9 @@
 import sqlite3
+import threading
+import time
 
 from app import create_app
+from app.routes import api as api_module
 from app.config import config
 from app.models import init_db
 
@@ -95,3 +98,51 @@ def test_summary_and_accuracy_calculate_metrics_from_matched_intervals(tmp_path,
     assert accuracy["metrics"]["rmse_mw"]["value"] == 100.0
     assert accuracy["metrics"]["bias_mw"]["value"] == 0.0
     assert accuracy["metrics"]["mape_percent"]["sample_count"] == 2
+
+
+
+def test_refresh_returns_quickly_and_exposes_background_job_status(tmp_path, monkeypatch):
+    monkeypatch.setattr(config, "DB_PATH", str(tmp_path / "async-refresh-test.db"))
+    app = create_app()
+    app.config.update(TESTING=True)
+    worker_finished = threading.Event()
+    expected_stats = {
+        "actual_records": 1488,
+        "forecast_records": 18080,
+        "eligible_forecasts": 744,
+        "matched_intervals": 744,
+        "unmatched_intervals": 744,
+        "errors": [],
+    }
+
+    def fake_ingest(start_date, end_date):
+        assert start_date == "2026-01-01"
+        assert end_date == "2026-02-01"
+        return expected_stats
+
+    monkeypatch.setattr(api_module, "ingest_and_evaluate_period", fake_ingest)
+    client = app.test_client()
+    response = client.post(
+        "/api/refresh",
+        json={"start_date": "2026-01-01", "end_date": "2026-02-01"},
+    )
+
+    assert response.status_code == 202, response.get_data(as_text=True)
+    started = response.get_json()
+    assert started["status"] == "started"
+    assert isinstance(started["refresh_id"], int)
+
+    # Wait for the background function to finish by observing the DB status.
+    deadline = time.monotonic() + 3
+    status_payload = None
+    while time.monotonic() < deadline:
+        status_response = client.get(f"/api/refresh/status/{started['refresh_id']}")
+        assert status_response.status_code == 200
+        status_payload = status_response.get_json()
+        if status_payload["status"] == "completed":
+            break
+        time.sleep(0.02)
+
+    assert status_payload["status"] == "completed"
+    assert status_payload["stats"] == expected_stats
+    assert status_payload["records_processed"] == 19568

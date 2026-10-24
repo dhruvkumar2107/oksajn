@@ -1,5 +1,6 @@
 import logging
 from datetime import datetime
+from threading import Thread
 from flask import Blueprint, jsonify, request, current_app
 import pandas as pd
 from werkzeug.exceptions import HTTPException
@@ -11,6 +12,9 @@ from ..models import (
     get_mape,
     get_latest_refresh,
     log_refresh,
+    create_refresh_job,
+    update_refresh_job,
+    get_refresh_job,
 )
 from ..services.data_processor import ingest_and_evaluate_period, import_from_json
 from ..config import config
@@ -320,6 +324,40 @@ def export_intervals():
     )
 
 
+def _run_refresh_job(app, refresh_id: int, start_date: str, end_date: str) -> None:
+    """Run the slow historical pull outside the request so proxies do not time it out."""
+    with app.app_context():
+        try:
+            stats = ingest_and_evaluate_period(start_date, end_date)
+            processed = int(stats.get("actual_records") or 0) + int(stats.get("forecast_records") or 0)
+            inserted = int(stats.get("matched_intervals") or 0)
+            errors = stats.get("errors") or []
+            if errors:
+                message = "; ".join(str(error) for error in errors)
+                update_refresh_job(
+                    refresh_id, "failed", records_processed=processed,
+                    records_inserted=inserted, records_failed=len(errors),
+                    error_message=message, result=stats,
+                )
+                logger.error("Elexon refresh job %s failed: %s", refresh_id, message)
+                return
+
+            update_refresh_job(
+                refresh_id, "completed", records_processed=processed,
+                records_inserted=inserted, result=stats,
+            )
+            logger.info("Elexon refresh job %s completed: %s", refresh_id, stats)
+        except Exception as exc:
+            logger.exception("Elexon refresh job %s crashed", refresh_id)
+            try:
+                update_refresh_job(
+                    refresh_id, "failed", records_failed=1,
+                    error_message="Refresh failed. Check backend logs for details.",
+                )
+            except Exception:
+                logger.exception("Could not persist failed refresh job %s", refresh_id)
+
+
 @api_bp.route("/refresh", methods=["POST"])
 def refresh():
     data = request.get_json(silent=True) or {}
@@ -334,29 +372,61 @@ def refresh():
     except (TypeError, ValueError):
         return jsonify({"status": "error", "message": "Dates must use YYYY-MM-DD"}), 400
 
-    log_refresh("api_refresh", "started")
-    try:
-        stats = ingest_and_evaluate_period(start_date, end_date)
-        if stats.get("errors"):
-            message = "; ".join(stats["errors"])
-            log_refresh(
-                "api_refresh", "failed",
-                records_processed=stats["actual_records"] + stats["forecast_records"],
-                records_inserted=stats["matched_intervals"],
-                error_message=message,
-            )
-            return jsonify({"status": "error", "message": message, "stats": stats}), 502
+    # Reuse a currently running API refresh rather than launching duplicate full backfills.
+    latest = get_latest_refresh()
+    if latest and latest.get("refresh_type") == "api_refresh" and latest.get("status") == "started" and not latest.get("completed_at"):
+        try:
+            age = pd.Timestamp.utcnow() - pd.to_datetime(latest.get("started_at"), utc=True)
+            if age < pd.Timedelta(minutes=15):
+                return jsonify({
+                    "status": "started",
+                    "refresh_id": latest["id"],
+                    "message": "A historical refresh is already running.",
+                }), 202
+        except (TypeError, ValueError):
+            pass
 
-        log_refresh(
-            "api_refresh", "completed",
-            records_processed=stats["actual_records"] + stats["forecast_records"],
-            records_inserted=stats["matched_intervals"],
+    refresh_id = create_refresh_job("api_refresh")
+    app = current_app._get_current_object()
+    worker = Thread(
+        target=_run_refresh_job,
+        args=(app, refresh_id, start_date, end_date),
+        name=f"elexon-refresh-{refresh_id}",
+        daemon=True,
+    )
+    try:
+        worker.start()
+    except Exception:
+        logger.exception("Could not start Elexon refresh job %s", refresh_id)
+        update_refresh_job(
+            refresh_id, "failed", records_failed=1,
+            error_message="Could not start the refresh worker.",
         )
-        return jsonify({"status": "success", "stats": stats})
-    except Exception as exc:
-        logger.exception("Refresh failed")
-        log_refresh("api_refresh", "failed", error_message=str(exc))
-        return jsonify({"status": "error", "message": "Refresh failed; inspect backend logs."}), 500
+        return jsonify({"status": "error", "message": "Could not start the refresh worker."}), 500
+
+    return jsonify({
+        "status": "started",
+        "refresh_id": refresh_id,
+        "message": "Historical Elexon refresh started. Poll the refresh status endpoint for progress.",
+    }), 202
+
+
+@api_bp.route("/refresh/status/<int:refresh_id>", methods=["GET"])
+def refresh_status(refresh_id: int):
+    job = get_refresh_job(refresh_id)
+    if not job:
+        return jsonify({"status": "error", "message": "Refresh job not found."}), 404
+    return jsonify({
+        "refresh_id": job["id"],
+        "status": job["status"],
+        "message": job.get("error_message"),
+        "started_at": job.get("started_at"),
+        "completed_at": job.get("completed_at"),
+        "records_processed": job.get("records_processed", 0),
+        "records_inserted": job.get("records_inserted", 0),
+        "records_failed": job.get("records_failed", 0),
+        "stats": job.get("stats"),
+    })
 
 
 def _load_import_records(upload):
