@@ -111,7 +111,10 @@ function App() {
       const result = await api.import(actualImportFile, forecastImportFile, '2026-01-01', '2026-02-01');
       if (result.status === 'success') {
         const stats = result.stats || {};
-        setImportMessage(`Imported ${stats.actual_records ?? 0} actual records and ${stats.forecast_records ?? 0} forecast records; ${stats.matched_intervals ?? 0} intervals matched.`);
+        const baseMessage = `Imported ${stats.actual_records ?? 0} actual records and ${stats.forecast_records ?? 0} forecast records; ${stats.matched_intervals ?? 0} intervals matched.`;
+        setImportMessage(result.message && result.message !== 'Import completed.'
+          ? `${baseMessage} ${result.message}`
+          : baseMessage);
         setActualImportFile(null);
         setForecastImportFile(null);
         await fetchSummary();
