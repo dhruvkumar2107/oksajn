@@ -205,9 +205,22 @@ def evaluate_forecasts(actuals: pd.DataFrame, forecasts: pd.DataFrame,
     forecasts = forecasts.copy()
 
     if actuals.empty:
-        actuals = pd.DataFrame(columns=["settlement_date", "settlement_period", "start_time_utc", "actual_generation_mw", "has_actual"])
+        actuals = pd.DataFrame({
+            "settlement_date": pd.Series(dtype="object"),
+            "settlement_period": pd.Series(dtype="Int64"),
+            "start_time_utc": pd.Series(dtype="datetime64[ns, UTC]"),
+            "actual_generation_mw": pd.Series(dtype="float64"),
+            "has_actual": pd.Series(dtype="int64"),
+        })
     if forecasts.empty:
-        forecasts = pd.DataFrame(columns=["settlement_date", "settlement_period", "start_time_utc", "selected_forecast_generation_mw", "selected_forecast_publish_time_utc", "has_forecast"])
+        forecasts = pd.DataFrame({
+            "settlement_date": pd.Series(dtype="object"),
+            "settlement_period": pd.Series(dtype="Int64"),
+            "start_time_utc": pd.Series(dtype="datetime64[ns, UTC]"),
+            "selected_forecast_generation_mw": pd.Series(dtype="float64"),
+            "selected_forecast_publish_time_utc": pd.Series(dtype="datetime64[ns, UTC]"),
+            "has_forecast": pd.Series(dtype="int64"),
+        })
 
     if "has_actual" not in actuals.columns:
         actuals["has_actual"] = 1
