@@ -7,6 +7,7 @@ import {
   CartesianGrid,
   Tooltip,
   Legend,
+  ReferenceLine,
   ResponsiveContainer,
   AreaChart,
   Area,
@@ -184,6 +185,8 @@ export function ErrorChart({ data, height = 300 }) {
   const chartData = data.map(d => ({
     time: d.start_time_utc,
     error: d.error_mw,
+    errorPositive: d.error_mw !== null && d.error_mw !== undefined && d.error_mw >= 0 ? d.error_mw : null,
+    errorNegative: d.error_mw !== null && d.error_mw !== undefined && d.error_mw < 0 ? d.error_mw : null,
     absoluteError: d.absolute_error_mw,
     status: d.evaluation_status,
   }));
@@ -204,7 +207,7 @@ export function ErrorChart({ data, height = 300 }) {
     );
   }
 
-  const maxAbsError = Math.max(...chartData
+  const maxAbsError = Math.max(1, ...chartData
     .filter(d => d.error !== null && d.error !== undefined)
     .map(d => Math.abs(d.error)));
 
@@ -252,22 +255,25 @@ export function ErrorChart({ data, height = 300 }) {
             domain={[-maxAbsError * 1.2, maxAbsError * 1.2]}
           />
           <Tooltip content={<CustomTooltip />} />
+          <ReferenceLine y={0} stroke={COLORS.zero} strokeDasharray="4 4" />
           <Line
             type="monotone"
-            dataKey="error"
+            dataKey="errorPositive"
             stroke={COLORS.error}
             strokeWidth={2}
             dot={false}
-            name="Forecast Error"
+            name="Overestimation (+)"
+            connectNulls={false}
             isAnimationActive={false}
           />
           <Line
             type="monotone"
-            dataKey="error"
+            dataKey="errorNegative"
             stroke={COLORS.forecast}
             strokeWidth={2}
             dot={false}
-            name="Forecast Error (negative)"
+            name="Underestimation (-)"
+            connectNulls={false}
             isAnimationActive={false}
           />
         </LineChart>
