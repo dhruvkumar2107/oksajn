@@ -30,6 +30,7 @@ class Config:
     ).rstrip("/")
     ELEXON_TIMEOUT: int = _int_env("ELEXON_TIMEOUT", 30)
     ELEXON_MAX_RETRIES: int = _int_env("ELEXON_MAX_RETRIES", 3)
+    ELEXON_MAX_CONCURRENCY: int = _int_env("ELEXON_MAX_CONCURRENCY", 6)
     ELEXON_RETRY_BACKOFF: float = _float_env("ELEXON_RETRY_BACKOFF", 1.0)
 
     DB_PATH: str = os.getenv("DB_PATH", "/data/windsight.db")
@@ -62,6 +63,8 @@ class Config:
             self.ELEXON_TIMEOUT = 30
         if self.ELEXON_MAX_RETRIES < 0:
             self.ELEXON_MAX_RETRIES = 3
+        if not 1 <= self.ELEXON_MAX_CONCURRENCY <= 10:
+            self.ELEXON_MAX_CONCURRENCY = 6
         if self.MAPE_EXCLUSION_THRESHOLD < 0:
             self.MAPE_EXCLUSION_THRESHOLD = 1.0
 
