@@ -22,6 +22,7 @@ function App() {
   const [activeAction, setActiveAction] = useState(null);
   const actualFileInputRef = useRef(null);
   const forecastFileInputRef = useRef(null);
+  const autoRefreshAttemptedRef = useRef(false);
 
   const fetchSummary = useCallback(async () => {
     try {
@@ -179,6 +180,17 @@ function App() {
     fetchForecasts();
     fetchIntervals(1);
   }, [fetchForecasts, fetchIntervals]);
+
+  // Make the deployed dashboard self-starting: when its persistent database is
+  // empty, attempt a single real Elexon backfill instead of leaving the user
+  // with empty charts until they discover the refresh button.
+  useEffect(() => {
+    const hasEvaluationRecords = Number(summary?.coverage?.total_intervals || 0) > 0;
+    if (summary && !hasEvaluationRecords && !autoRefreshAttemptedRef.current) {
+      autoRefreshAttemptedRef.current = true;
+      void handleRefresh();
+    }
+  }, [summary]);
 
   return (
     <div className="app">
