@@ -264,9 +264,9 @@ function App() {
                 key={key}
                 metric={{
                   name: key.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase()),
-                  value: metric.value,
-                  unit: key.includes('mape') ? '%' : 'MW',
-                  sample_count: metric.sample_count,
+                  value: key === 'coverage' ? metric.coverage_percent : metric.value,
+                  unit: key === 'coverage' || key.includes('mape') ? '%' : 'MW',
+                  sample_count: key === 'coverage' ? metric.matched_intervals : metric.sample_count,
                   description: metric.description,
                   formula: key === 'mae_mw' ? 'MAE = mean(|forecast - actual|)' :
                            key === 'rmse_mw' ? 'RMSE = sqrt(mean((forecast - actual)²))' :
