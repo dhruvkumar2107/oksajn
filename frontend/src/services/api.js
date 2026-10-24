@@ -10,7 +10,12 @@ async function readResponse(response) {
   try {
     return JSON.parse(text);
   } catch {
-    return { message: text.slice(0, 500) || 'The server returned a non-JSON response.' };
+    const looksLikeHtml = /<\\s*!doctype html|<\\s*html[\\s>]|<\\s*title>/i.test(text);
+    return {
+      message: looksLikeHtml
+        ? 'The backend returned an HTML error page instead of JSON. Check the backend deployment and server logs.'
+        : text.slice(0, 500) || 'The server returned a non-JSON response.',
+    };
   }
 }
 
