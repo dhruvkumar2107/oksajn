@@ -116,10 +116,11 @@ def normalize_actual_generation(raw_records: list) -> pd.DataFrame:
         "settlement_date", "settlement_period", "start_time_utc",
         "publish_time_utc", "generation_mw"
     ]]
-    df = df.drop_duplicates(
-        subset=["settlement_date", "settlement_period", "start_time_utc", "publish_time_utc"],
-        keep="last",
-    )
+    # FUELHH can contain more than one published version of a delivery
+    # interval. Evaluation should compare against one final/latest actual,
+    # while preserving the source's publication timestamp when it exists.
+    df = df.sort_values(["start_time_utc", "publish_time_utc"], kind="stable")
+    df = df.drop_duplicates(subset=["start_time_utc"], keep="last")
     return df.reset_index(drop=True)
 
 
@@ -187,8 +188,10 @@ def select_eligible_forecasts(forecasts: pd.DataFrame) -> pd.DataFrame:
     if eligible.empty:
         return pd.DataFrame(columns=forecasts.columns.tolist() + ["decision_cutoff_utc", "is_eligible"])
 
-    eligible = eligible.sort_values(["settlement_date", "settlement_period", "publish_time_utc"])
-    selected = eligible.drop_duplicates(subset=["settlement_date", "settlement_period"], keep="last")
+    # startTime is the actual target delivery interval. Use it as the
+    # primary selection key rather than relying only on settlement labels.
+    eligible = eligible.sort_values(["start_time_utc", "publish_time_utc"], kind="stable")
+    selected = eligible.drop_duplicates(subset=["start_time_utc"], keep="last")
 
     return selected
 
@@ -300,8 +303,11 @@ def ingest_and_evaluate_period(start_date: str, end_date: str) -> dict:
     actual_from, actual_to = _uk_publication_window(
         start_date, end_date, pad_start_days=1, pad_end_days=1
     )
+    # Include a seven-day publication lookback so an interval with no D-1
+    # update can still use the latest earlier vintage that was available.
+    # A source record is still eligible only if publishTime <= its cutoff.
     forecast_from, forecast_to = _uk_publication_window(
-        start_date, end_date, pad_start_days=1, pad_end_days=0
+        start_date, end_date, pad_start_days=7, pad_end_days=0
     )
 
     try:
@@ -361,6 +367,17 @@ def ingest_and_evaluate_period(start_date: str, end_date: str) -> dict:
         stats["errors"].append(
             "No genuine WINDFOR records with publication timestamps were returned for the "
             "requested delivery period. Do not report accuracy metrics without eligible vintages."
+        )
+    elif stats["eligible_forecasts"] == 0:
+        stats["errors"].append(
+            "WINDFOR records were returned, but none was published at or before the configured "
+            "procurement cutoff for the requested delivery intervals. Verify cutoff settings "
+            "and historical publication coverage."
+        )
+    elif stats["actual_records"] > 0 and stats["matched_intervals"] == 0:
+        stats["errors"].append(
+            "Actuals and eligible forecasts were found, but no delivery intervals matched on "
+            "startTime. Inspect the source timestamps and imported file schemas."
         )
     return stats
 
