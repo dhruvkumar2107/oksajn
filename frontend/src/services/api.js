@@ -77,33 +77,50 @@ export const api = {
   },
 
   refresh: async (startDate = '2026-01-01', endDate = '2026-02-01') => {
-    // The initial request returns a job ID immediately. Poll the cheap status
-    // endpoint while the backend fetches the full historic Elexon publication window.
-    const started = await request('/refresh', {
-      method: 'POST',
-      timeoutMs: 20000,
-      body: JSON.stringify({ start_date: startDate, end_date: endDate }),
-    });
-
-    // Backwards compatibility if an older backend still returns a completed result.
-    if (started.status === 'success') return started;
-    if (started.status !== 'started' || !started.refresh_id) {
-      throw new Error(started.message || 'The backend did not start the refresh job.');
+    // Keep each request short enough for the hosting proxy. In-process job IDs
+    // are unreliable when a web host restarts or routes polls across instances.
+    const start = new Date(`${startDate}T00:00:00Z`);
+    const end = new Date(`${endDate}T00:00:00Z`);
+    if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || end <= start) {
+      throw new Error('Refresh dates are invalid. Check the selected start and end dates.');
     }
 
-    const deadline = Date.now() + 8 * 60 * 1000;
-    while (Date.now() < deadline) {
-      await new Promise(resolve => window.setTimeout(resolve, 2000));
-      const job = await request(`/refresh/status/${encodeURIComponent(started.refresh_id)}`);
-      if (job.status === 'completed') {
-        return { status: 'success', stats: job.stats || {} };
+    const chunkDays = 7;
+    const totals = {
+      actual_records: 0,
+      forecast_records: 0,
+      eligible_forecasts: 0,
+      matched_intervals: 0,
+      unmatched_intervals: 0,
+      errors: [],
+      chunks_completed: 0,
+      chunks_total: Math.ceil((end.getTime() - start.getTime()) / (chunkDays * 86400000)),
+    };
+    let cursor = start.getTime();
+
+    while (cursor < end.getTime()) {
+      const next = Math.min(cursor + chunkDays * 86400000, end.getTime());
+      const chunkStart = new Date(cursor).toISOString().slice(0, 10);
+      const chunkEnd = new Date(next).toISOString().slice(0, 10);
+      const result = await request('/refresh', {
+        method: 'POST',
+        timeoutMs: 100000,
+        body: JSON.stringify({ start_date: chunkStart, end_date: chunkEnd }),
+      });
+      if (result.status !== 'success') {
+        throw new Error(result.message || `Elexon refresh failed for ${chunkStart} to ${chunkEnd}.`);
       }
-      if (job.status === 'failed' || job.status === 'error') {
-        throw new Error(job.message || 'The Elexon refresh failed. Check the backend refresh status and logs.');
+
+      const stats = result.stats || {};
+      for (const key of ['actual_records', 'forecast_records', 'eligible_forecasts', 'matched_intervals', 'unmatched_intervals']) {
+        totals[key] += Number(stats[key] || 0);
       }
+      if (Array.isArray(stats.errors)) totals.errors.push(...stats.errors);
+      totals.chunks_completed += 1;
+      cursor = next;
     }
 
-    throw new Error('The refresh is still running. Wait a moment, then refresh the dashboard to see whether it completed.');
+    return { status: 'success', stats: totals };
   },
 
   import: (actualFile, forecastFile, startDate = '2026-01-01', endDate = '2026-02-01') => {

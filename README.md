@@ -68,7 +68,7 @@ The documentation links above describe the APIs; they are not the JSON data URLs
 
 ### Data Flow
 
-1. **Ingestion**: Fetch actuals (FUELHH, filtered to WIND) and forecasts (WINDFOR) from Elexon API. The dashboard starts refresh as a background job and polls a status endpoint, avoiding long-running proxy requests.
+1. **Ingestion**: Fetch actuals (FUELHH, filtered to WIND) and forecasts (WINDFOR) from Elexon API. Month refreshes are split into sequential, non-overlapping seven-day delivery windows to keep each request below hosting proxy timeouts.
 2. **Normalization**: Parse timestamps to UTC, convert to `Europe/London` for cutoff logic
 3. **Forecast Selection**: For each delivery interval, select the latest forecast with `publishTime ≤ decision_cutoff`
 4. **Evaluation**: Join actuals with selected forecasts, calculate signed errors
