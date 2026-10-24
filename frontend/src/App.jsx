@@ -292,6 +292,8 @@ function App() {
                 type="date"
                 className="filter-input"
                 value={dateRange.start}
+                min="2026-01-01"
+                max="2026-01-31"
                 onChange={e => setDateRange(prev => ({ ...prev, start: e.target.value }))}
               />
             </div>
@@ -301,6 +303,8 @@ function App() {
                 type="date"
                 className="filter-input"
                 value={dateRange.end}
+                min="2026-01-02"
+                max="2026-02-01"
                 onChange={e => setDateRange(prev => ({ ...prev, end: e.target.value }))}
               />
             </div>
@@ -325,7 +329,7 @@ function App() {
       <footer className="footer">
         WindSight Day-Ahead Analytics Pilot — Built for UK electricity procurement teams.
         Data source: Elexon BMRS FUELHH & WINDFOR datasets. 
-        Forecast selection: latest eligible forecast published at or before 11:00 UK time (D-1).
+        Forecast selection: latest eligible forecast at or before the configured UK day-ahead cutoff.
         Not for operational use without validation.
       </footer>
     </div>
