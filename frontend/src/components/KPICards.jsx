@@ -73,7 +73,7 @@ export function OverviewCards({ summary, accuracy, lastRefresh }) {
         title="Evaluation Coverage"
         value={coverage.coverage_percent}
         unit="%"
-        subtitle={`${coverage.matched_intervals || 0} of ${coverage.total_intervals || 0} intervals matched`}
+        subtitle={`${coverage.matched_intervals || 0} of ${coverage.intervals_with_actual || 0} actual intervals matched`}
       />
       <KPICard
         title="Latest Eligible Forecast Published"
