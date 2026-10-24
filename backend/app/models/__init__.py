@@ -62,10 +62,6 @@ CREATE TABLE IF NOT EXISTS data_refresh_log (
     UNIQUE(refresh_type, started_at)
 );
 
-CREATE INDEX IF NOT EXISTS idx_actual_date_period ON actual_generation(settlement_date, settlement_period);
-CREATE INDEX IF NOT EXISTS idx_forecast_date_period ON forecast_generation(settlement_date, settlement_period);
-CREATE INDEX IF NOT EXISTS idx_evaluation_date_period ON evaluation_results(settlement_date, settlement_period);
-CREATE INDEX IF NOT EXISTS idx_forecast_publish_time ON forecast_generation(publish_time_utc);
 """
 
 
