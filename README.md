@@ -230,9 +230,9 @@ npm run dev  # http://localhost:5173
 
 | Service | URL |
 |---------|-----|
-| **Frontend Dashboard** | https://windsight-frontend.vercel.app |
-| **Backend API** | https://windsight-backend.onrender.com |
-| **Health Check** | https://windsight-backend.onrender.com/api/health |
+| **Frontend Dashboard** | https://frontend-95b6.vercel.app |
+| **Backend API** | https://oksajn.onrender.com |
+| **Health Check** | https://oksajn.onrender.com/api/health |
 
 > **Submission Note:** For the challenge submission, create a **new anonymous public GitHub repo** (e.g., `kjhwr`, `x7k9m2`) and push this code there. Update this README with the actual deployed URLs from your deployment.
 
@@ -354,16 +354,16 @@ npm run build
 ## 🌐 Deployment
 
 ### Live Deployment
-- **Frontend (Vercel):** https://windsight-frontend.vercel.app
-- **Backend (Render):** https://windsight-backend.onrender.com
-- **API Health:** https://windsight-backend.onrender.com/api/health
+- **Frontend (Vercel):** https://frontend-95b6.vercel.app
+- **Backend (Render):** https://oksajn.onrender.com
+- **API Health:** https://oksajn.onrender.com/api/health
 
 ### Frontend → Vercel
 1. Connect GitHub repository to Vercel
 2. Set **Framework Preset**: Vite
 3. Set **Build Command**: `npm run build`
 4. Set **Output Directory**: `dist`
-5. Add Environment Variable: `VITE_API_BASE=https://windsight-backend.onrender.com/api`
+5. Add Environment Variable: `VITE_API_BASE=https://oksajn.onrender.com/api`
 6. Deploy — Vercel uses `vercel.json` for API rewrites
 
 ### Backend → Render (Recommended)
@@ -374,7 +374,7 @@ npm run build
 5. Add Environment Variables from `.env.example`:
    - `DB_PATH=/data/windsight.db`
    - `FLASK_DEBUG=false`
-   - `CORS_ORIGINS=https://windsight-frontend.vercel.app`
+   - `CORS_ORIGINS=https://frontend-95b6.vercel.app`
    - (All other vars from `.env.example`)
 6. Add **Persistent Disk**:
    - Name: `windsight-data`
