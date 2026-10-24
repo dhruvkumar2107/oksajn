@@ -231,24 +231,33 @@ def get_evaluation_count(start_date: str, end_date: str) -> int:
 
 
 def get_summary_metrics(start_date: str, end_date: str) -> dict:
+    """Return aggregate forecast metrics without requiring SQLite's optional SQRT()."""
+    import math
+
     with get_db_connection() as conn:
         sql = """
-            SELECT 
-                COUNT(*) as total_intervals,
-                SUM(has_actual) as intervals_with_actual,
-                SUM(has_eligible_forecast) as intervals_with_forecast,
-                SUM(CASE WHEN has_actual = 1 AND has_eligible_forecast = 1 THEN 1 ELSE 0 END) as matched_intervals,
-                AVG(CASE WHEN has_actual = 1 AND has_eligible_forecast = 1 THEN absolute_error_mw END) as mae,
-                SQRT(AVG(CASE WHEN has_actual = 1 AND has_eligible_forecast = 1 THEN error_mw * error_mw END)) as rmse,
-                AVG(CASE WHEN has_actual = 1 AND has_eligible_forecast = 1 THEN error_mw END) as bias,
-                MIN(start_time_utc) as period_start,
-                MAX(start_time_utc) as period_end
+            SELECT
+                COUNT(*) AS total_intervals,
+                COALESCE(SUM(has_actual), 0) AS intervals_with_actual,
+                COALESCE(SUM(has_eligible_forecast), 0) AS intervals_with_forecast,
+                COALESCE(SUM(CASE WHEN has_actual = 1 AND has_eligible_forecast = 1
+                                  THEN 1 ELSE 0 END), 0) AS matched_intervals,
+                AVG(CASE WHEN has_actual = 1 AND has_eligible_forecast = 1
+                         THEN absolute_error_mw END) AS mae,
+                AVG(CASE WHEN has_actual = 1 AND has_eligible_forecast = 1
+                         THEN error_mw * error_mw END) AS mse,
+                AVG(CASE WHEN has_actual = 1 AND has_eligible_forecast = 1
+                         THEN error_mw END) AS bias,
+                MIN(start_time_utc) AS period_start,
+                MAX(start_time_utc) AS period_end
             FROM evaluation_results
             WHERE settlement_date >= ? AND settlement_date < ?
         """
-        cursor = conn.execute(sql, (start_date, end_date))
-        row = cursor.fetchone()
-        return dict(row) if row else {}
+        row = conn.execute(sql, (start_date, end_date)).fetchone()
+        result = dict(row) if row else {}
+        mse = result.pop("mse", None)
+        result["rmse"] = math.sqrt(float(mse)) if mse is not None else None
+        return result
 
 
 def get_mape(start_date: str, end_date: str, threshold: float = 1.0) -> dict:
