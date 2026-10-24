@@ -180,8 +180,6 @@ function App() {
     fetchIntervals(1);
   }, [fetchForecasts, fetchIntervals]);
 
-  const isLoading = Object.values(loading).some(v => v);
-
   return (
     <div className="app">
       <header className="header">
