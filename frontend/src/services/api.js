@@ -1,8 +1,4 @@
-const configuredBase = import.meta.env.VITE_API_BASE || '/api';
-// Production always uses the same-origin Vercel/Nginx /api proxy. This also
-// prevents a stale Vercel VITE_API_BASE setting from bypassing the proxy and
-// causing browser CORS failures. VITE_API_BASE is honored only in dev.
-const API_BASE = (import.meta.env.DEV ? configuredBase : '/api').replace(/\/+$/, '');
+const API_BASE = 'https://oksajn.onrender.com/api';
 
 async function readResponse(response) {
   const text = await response.text();
