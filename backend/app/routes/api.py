@@ -339,16 +339,6 @@ def refresh():
     except (TypeError, ValueError):
         return jsonify({"status": "error", "message": "Dates must use YYYY-MM-DD"}), 400
 
-    # Elexon public API doesn't support historical date queries
-    # Return early with guidance instead of hanging
-    from datetime import date as date_cls
-    today = date_cls.today()
-    if end < today:
-        return jsonify({
-            "status": "error",
-            "message": "Elexon public API does not support historical queries. Use Import feature with genuine Elexon JSON files for historical data (e.g., January 2026)."
-        }), 400
-
     log_refresh("api_refresh", "started")
     try:
         stats = ingest_and_evaluate_period(start_date, end_date)
